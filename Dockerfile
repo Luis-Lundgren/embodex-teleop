@@ -1,0 +1,46 @@
+FROM python:3.10-slim
+
+# Install system dependencies
+# build-essential and git are often needed for pip installing certain packages
+# libgl1-mesa-glx and libglib2.0-0 are for pybullet/opencv headless if needed
+# openssl is used by the application to generate self-signed certificates
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    git \
+    openssl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy requirement files first for better caching
+COPY requirements.txt .
+COPY pyproject.toml .
+
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+# Install the package itself in editable mode so it can find its own files relative to project root
+RUN pip install --no-cache-dir -e .
+
+# Copy the application source and assets
+COPY telegrip ./telegrip
+COPY URDF ./URDF
+COPY web-ui ./web-ui
+COPY config.yaml .
+COPY reference_poses.json .
+
+# Create directory for recordings
+RUN mkdir -p records
+
+# Expose ports
+# 8443: HTTPS API and UI
+# 8442: WebSocket for VR/Teleop
+EXPOSE 8443
+EXPOSE 8442
+
+# Ensure python output is streamed directly to terminal
+ENV PYTHONUNBUFFERED=1
+
+# Default command as requested: no physical robot, digital twin enabled, recording active
+CMD ["telegrip", "--no-robot", "--digital-twin", "--record"]
