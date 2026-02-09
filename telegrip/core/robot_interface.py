@@ -4,17 +4,16 @@ Provides a clean wrapper around robot devices with safety checks and convenience
 """
 
 import numpy as np
-import torch
 import time
 import logging
 import os
 import sys
 import contextlib
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, TYPE_CHECKING
 
-# New lerobot structure imports
-from lerobot.robots.so_follower.config_so_follower import SO100FollowerConfig
-from lerobot.robots.so_follower.so_follower import SO100Follower
+if TYPE_CHECKING:
+    from lerobot.robots.so_follower.config_so_follower import SO100FollowerConfig
+    from lerobot.robots.so_follower.so_follower import SO100Follower
 
 from ..config import (
     TelegripConfig, NUM_JOINTS, JOINT_NAMES,
@@ -98,8 +97,9 @@ class RobotInterface:
         self.max_arm_errors = 3  # Allow fewer errors per arm before marking as disconnected
         self.max_general_errors = 8  # Allow more general errors before full disconnection
     
-    def setup_robot_configs(self) -> Tuple[SO100FollowerConfig, SO100FollowerConfig]:
+    def setup_robot_configs(self) -> Tuple["SO100FollowerConfig", "SO100FollowerConfig"]:
         """Create robot configurations for both arms."""
+        from lerobot.robots.so_follower.config_so_follower import SO100FollowerConfig
         logger.info(f"Setting up robot configs with ports: {self.config.follower_ports}")
         
         left_config = SO100FollowerConfig(
@@ -137,6 +137,7 @@ class RobotInterface:
                           self.config.log_level == "error")
         
         try:
+            from lerobot.robots.so_follower.so_follower import SO100Follower
             left_config, right_config = self.setup_robot_configs()
             if not should_suppress:
                 logger.info("Connecting to robot...")

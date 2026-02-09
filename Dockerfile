@@ -2,11 +2,11 @@ FROM python:3.10-slim
 
 # Install system dependencies
 # build-essential and git are often needed for pip installing certain packages
-# libgl1-mesa-glx and libglib2.0-0 are for pybullet/opencv headless if needed
+# libgl1 and libglib2.0-0 are for pybullet/opencv headless if needed
 # openssl is used by the application to generate self-signed certificates
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     git \
     openssl \
@@ -16,15 +16,16 @@ WORKDIR /app
 
 # Copy requirement files first for better caching
 COPY requirements.txt .
-COPY pyproject.toml .
-
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
-# Install the package itself in editable mode so it can find its own files relative to project root
-RUN pip install --no-cache-dir -e .
 
 # Copy the application source and assets
 COPY telegrip ./telegrip
+COPY pyproject.toml .
+
+# Install the package itself in editable mode so it can find its own files relative to project root
+RUN pip install --no-cache-dir -e .
+
 COPY URDF ./URDF
 COPY web-ui ./web-ui
 COPY config.yaml .
