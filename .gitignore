@@ -1,0 +1,28 @@
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Recordings and local data
+records/
+motion_exchange/datasets/
+
+# Local configuration
+config.yaml
+cert.pem
+key.pem
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
