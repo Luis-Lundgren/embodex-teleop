@@ -9,8 +9,12 @@ import logging
 import signal
 import sys
 import os
-import http.server
-import ssl
+import fastapi
+from fastapi import FastAPI, WebSocket, Request, BackgroundTasks
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
 import socket
 import json
 import urllib.parse
@@ -85,383 +89,199 @@ from .utils import get_next_session_dir
 logger = logging.getLogger(__name__)
 
 
-class APIHandler(http.server.BaseHTTPRequestHandler):
-    """HTTP request handler for the teleoperation API."""
-    
-    def __init__(self, *args, **kwargs):
-        # Set CORS headers for all requests
-        super().__init__(*args, **kwargs)
-    
-    def end_headers(self):
-        """Add CORS headers to all responses."""
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+def create_app(system: 'TelegripSystem'):
+    """Create a FastAPI application for the teleoperation system."""
+    app = FastAPI(title="TeleGrip API")
+
+    # Add CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    @app.get("/api/status")
+    async def get_status():
         try:
-            super().end_headers()
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, ssl.SSLError):
-            # Client disconnected or SSL error - ignore silently
-            pass
-    
-    def do_OPTIONS(self):
-        """Handle preflight CORS requests."""
-        self.send_response(200)
-        self.end_headers()
-    
-    def log_message(self, format, *args):
-        """Override to reduce HTTP request logging noise."""
-        pass  # Disable default HTTP logging
-    
-    def do_GET(self):
-        """Handle GET requests."""
-        if self.path == '/api/status':
-            self.handle_status_request()
-        elif self.path == '/api/config':
-            self.handle_config_get_request()
-        elif self.path.startswith('/assets/'):
-             # Serve assets from assets directory (nested)
-             # Adjust path to match web-ui/assets/...
-             self.serve_file(f'web-ui{self.path}', 'application/octet-stream')
-        elif self.path == '/' or self.path == '/index.html':
-            # Serve main page from web-ui directory
-            self.serve_file('web-ui/index.html', 'text/html')
-        elif self.path.endswith('.css'):
-            # Serve CSS files from web-ui directory
-            self.serve_file(f'web-ui{self.path}', 'text/css')
-        elif self.path.endswith('.js'):
-            # Serve JS files from web-ui directory
-            self.serve_file(f'web-ui{self.path}', 'application/javascript')
-        elif self.path.endswith('.ico'):
-             self.serve_file(f'web-ui{self.path}', 'image/x-icon')
-        elif self.path.endswith(('.jpg', '.jpeg')):
-            # Serve image files from web-ui directory
-            self.serve_file(f'web-ui{self.path}', 'image/jpeg')
-        elif self.path.endswith('.png'):
-            # Serve image files from web-ui directory
-            self.serve_file(f'web-ui{self.path}', 'image/png')
-        elif self.path.endswith('.gif'):
-            # Serve image files from web-ui directory
-            self.serve_file(f'web-ui{self.path}', 'image/gif')
-        else:
-             # Try serving as general static file if in web-ui
-             self.serve_file(f'web-ui{self.path}', 'application/octet-stream')
-    
-    def do_POST(self):
-        """Handle POST requests."""
-        if self.path == '/api/keyboard':
-            self.handle_keyboard_request()
-        elif self.path == '/api/robot':
-            self.handle_robot_request()
-        elif self.path == '/api/keypress':
-            self.handle_keypress_request()
-        elif self.path == '/api/config':
-            self.handle_config_post_request()
-        elif self.path == '/api/restart':
-            self.handle_restart_request()
-        else:
-            self.send_error(404, "Not found")
-    
-    def handle_status_request(self):
-        """Handle status requests."""
-        try:
-            # Get system reference
-            if hasattr(self.server, 'api_handler') and self.server.api_handler:
-                system = self.server.api_handler
-                
-                # Get status from control loop
-                control_status = system.control_loop.status if system.control_loop else {}
-                
-                # Get keyboard status
-                keyboard_enabled = False
-                if system.web_keyboard_handler and hasattr(system.web_keyboard_handler, 'is_enabled'):
-                    keyboard_enabled = system.web_keyboard_handler.is_enabled
-                
-                # Get robot engagement status
-                robot_engaged = False
-                if system.control_loop and system.control_loop.robot_interface:
-                    robot_engaged = system.control_loop.robot_interface.is_engaged
-                
-                # Get VR connection status
-                vr_connected = False
-                if system.vr_server and system.vr_server.is_running:
-                    vr_connected = len(system.vr_server.clients) > 0
-                
-                status = {
-                    **control_status,
-                    "keyboardEnabled": keyboard_enabled,
-                    "robotEngaged": robot_engaged,
-                    "vrConnected": vr_connected
-                }
-                
-                # Send JSON response
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                
-                response = json.dumps(status)
-                self.wfile.write(response.encode('utf-8'))
-            else:
-                self.send_error(500, "System not available")
-                
+            # Get status from control loop
+            control_status = system.control_loop.status if system.control_loop else {}
+            
+            # Get keyboard status
+            keyboard_enabled = False
+            if system.web_keyboard_handler and hasattr(system.web_keyboard_handler, 'is_enabled'):
+                keyboard_enabled = system.web_keyboard_handler.is_enabled
+            
+            # Get robot engagement status
+            robot_engaged = False
+            if system.control_loop and system.control_loop.robot_interface:
+                robot_engaged = system.control_loop.robot_interface.is_engaged
+            
+            # Get VR connection status
+            vr_connected = False
+            if system.vr_server and system.vr_server.is_running:
+                vr_connected = len(system.vr_server.clients) > 0
+            
+            status = {
+                **control_status,
+                "keyboardEnabled": keyboard_enabled,
+                "robotEngaged": robot_engaged,
+                "vrConnected": vr_connected
+            }
+            return status
         except Exception as e:
             logger.error(f"Error handling status request: {e}")
-            self.send_error(500, str(e))
-    
-    def handle_keyboard_request(self):
-        """Handle keyboard control requests."""
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    @app.get("/api/config")
+    async def get_config():
         try:
-            content_length = int(self.headers.get('Content-Length', 0))
-            if content_length == 0:
-                self.send_error(400, "No request body")
-                return
-            
-            post_data = self.rfile.read(content_length)
-            data = json.loads(post_data.decode('utf-8'))
-            
-            action = data.get('action')
-            
-            if action in ['enable', 'disable']:
-                # Add keyboard command to queue for processing by main thread
-                if hasattr(self.server, 'api_handler') and self.server.api_handler:
-                    command_name = f"{action}_keyboard"
-                    logger.info(f"🎮 Adding command to queue: {command_name}")
-                    self.server.api_handler.add_control_command(command_name)
-                    
-                    self.send_response(200)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"success": True, "action": action}).encode('utf-8'))
-                else:
-                    self.send_error(500, "System not available")
-            else:
-                self.send_error(400, f"Invalid action: {action}")
-                
-        except json.JSONDecodeError:
-            self.send_error(400, "Invalid JSON")
-        except Exception as e:
-            logger.error(f"Error handling keyboard request: {e}")
-            self.send_error(500, str(e))
-    
-    def handle_robot_request(self):
-        """Handle robot control requests."""
-        try:
-            content_length = int(self.headers.get('Content-Length', 0))
-            if content_length == 0:
-                self.send_error(400, "No request body")
-                return
-            
-            post_data = self.rfile.read(content_length)
-            data = json.loads(post_data.decode('utf-8'))
-            
-            action = data.get('action')
-            logger.info(f"🔌 Received robot action: {action}")
-            
-            if action in ['connect', 'disconnect']:
-                # Add robot command to queue for processing by main thread
-                if hasattr(self.server, 'api_handler') and self.server.api_handler:
-                    command_name = f"robot_{action}"
-                    logger.info(f"🔌 Adding command to queue: {command_name}")
-                    self.server.api_handler.add_control_command(command_name)
-                    
-                    self.send_response(200)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"success": True, "action": action}).encode('utf-8'))
-                else:
-                    logger.error("🔌 Server api_handler not available")
-                    self.send_error(500, "System not available")
-            else:
-                self.send_error(400, f"Invalid action: {action}")
-                
-        except json.JSONDecodeError:
-            self.send_error(400, "Invalid JSON")
-        except Exception as e:
-            logger.error(f"Error handling robot request: {e}")
-            self.send_error(500, str(e))
-    
-    def handle_keypress_request(self):
-        """Handle keypress control requests."""
-        try:
-            content_length = int(self.headers.get('Content-Length', 0))
-            if content_length == 0:
-                self.send_error(400, "No request body")
-                return
-            
-            post_data = self.rfile.read(content_length)
-            data = json.loads(post_data.decode('utf-8'))
-            
-            key = data.get('key')
-            action = data.get('action')
-            
-            if key and action in ['press', 'release']:
-                # Add keypress command to queue for processing by main thread
-                if hasattr(self.server, 'api_handler') and self.server.api_handler:
-                    command = {
-                        "action": "web_keypress",
-                        "key": key,
-                        "event": action
-                    }
-                    logger.info(f"🎮 Adding keypress command to queue: {key}_{action}")
-                    self.server.api_handler.add_keypress_command(command)
-                    
-                    self.send_response(200)
-                    self.send_header('Content-Type', 'application/json')  
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"success": True, "key": key, "action": action}).encode('utf-8'))
-                else:
-                    logger.error("🎮 Server api_handler not available")
-                    self.send_error(500, "System not available")
-            else:
-                self.send_error(400, f"Invalid key or action: {key}, {action}")
-                
-        except json.JSONDecodeError:
-            self.send_error(400, "Invalid JSON")
-        except Exception as e:
-            logger.error(f"Error handling keypress request: {e}")
-            self.send_error(500, str(e))
-    
-    def handle_config_get_request(self):
-        """Handle configuration read requests."""
-        try:
-            config_data = get_config_data()
-            
-            # Send JSON response
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            
-            response = json.dumps(config_data)
-            self.wfile.write(response.encode('utf-8'))
-            
+            return get_config_data()
         except Exception as e:
             logger.error(f"Error handling config get request: {e}")
-            self.send_error(500, str(e))
-    
-    def handle_config_post_request(self):
-        """Handle configuration update requests."""
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    @app.post("/api/config")
+    async def post_config(request: Request):
         try:
-            content_length = int(self.headers.get('Content-Length', 0))
-            if content_length == 0:
-                self.send_error(400, "No request body")
-                return
-            
-            post_data = self.rfile.read(content_length)
-            data = json.loads(post_data.decode('utf-8'))
-            
-            # Update configuration
+            data = await request.json()
             success = update_config_data(data)
-            
             if success:
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({"success": True, "message": "Configuration updated successfully"}).encode('utf-8'))
                 logger.info("Configuration updated successfully")
+                return {"success": True, "message": "Configuration updated successfully"}
             else:
-                self.send_error(500, "Failed to save configuration")
-                
-        except json.JSONDecodeError:
-            self.send_error(400, "Invalid JSON")
+                return JSONResponse(status_code=500, content={"error": "Failed to save configuration"})
         except Exception as e:
             logger.error(f"Error handling config post request: {e}")
-            self.send_error(500, str(e))
-    
-    def handle_restart_request(self):
-        """Handle restart requests."""
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    @app.post("/api/keyboard")
+    async def post_keyboard(request: Request):
         try:
-            if hasattr(self.server, 'api_handler') and self.server.api_handler:
-                logger.info("Restarting teleoperation system...")
-                self.server.api_handler.restart()
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({"success": True, "message": "Teleoperation system restarted"}).encode('utf-8'))
+            data = await request.json()
+            action = data.get('action')
+            if action in ['enable', 'disable']:
+                command_name = f"{action}_keyboard"
+                logger.info(f"🎮 Adding command to queue: {command_name}")
+                system.add_control_command(command_name)
+                return {"success": True, "action": action}
             else:
-                self.send_error(500, "System not available")
-                
+                return JSONResponse(status_code=400, content={"error": f"Invalid action: {action}"})
+        except Exception as e:
+            logger.error(f"Error handling keyboard request: {e}")
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    @app.post("/api/robot")
+    async def post_robot(request: Request):
+        try:
+            data = await request.json()
+            action = data.get('action')
+            logger.info(f"🔌 Received robot action: {action}")
+            if action in ['connect', 'disconnect']:
+                command_name = f"robot_{action}"
+                logger.info(f"🔌 Adding command to queue: {command_name}")
+                system.add_control_command(command_name)
+                return {"success": True, "action": action}
+            else:
+                return JSONResponse(status_code=400, content={"error": f"Invalid action: {action}"})
+        except Exception as e:
+            logger.error(f"Error handling robot request: {e}")
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    @app.post("/api/keypress")
+    async def post_keypress(request: Request):
+        try:
+            data = await request.json()
+            key = data.get('key')
+            action = data.get('action')
+            if key and action in ['press', 'release']:
+                command = {
+                    "action": "web_keypress",
+                    "key": key,
+                    "event": action
+                }
+                logger.info(f"🎮 Adding keypress command to queue: {key}_{action}")
+                system.add_keypress_command(command)
+                return {"success": True, "key": key, "action": action}
+            else:
+                return JSONResponse(status_code=400, content={"error": f"Invalid key or action: {key}, {action}"})
+        except Exception as e:
+            logger.error(f"Error handling keypress request: {e}")
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    @app.post("/api/restart")
+    async def post_restart():
+        try:
+            logger.info("Restarting teleoperation system...")
+            system.restart()
+            return {"success": True, "message": "Teleoperation system restarted"}
         except Exception as e:
             logger.error(f"Error handling restart request: {e}")
-            self.send_error(500, str(e))
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    @app.websocket("/ws")
+    async def websocket_endpoint(websocket: WebSocket):
+        if system.vr_server:
+            await system.vr_server.fastapi_handler(websocket)
+        else:
+            await websocket.close(code=1011)
+
+    # Health check
+    @app.get("/health")
+    async def health():
+        return {"status": "ok"}
+
+    # Serve static files from web-ui directory
+    from .utils import get_absolute_path
+    web_ui_path = get_absolute_path('web-ui')
+    if web_ui_path.exists():
+        app.mount("/", StaticFiles(directory=str(web_ui_path), html=True), name="static")
     
-    def serve_file(self, filename, content_type):
-        """Serve a static file from the project directory."""
-        from .utils import get_absolute_path
-        try:
-            # Convert relative path to absolute path in project directory
-            abs_path = get_absolute_path(filename)
-            
-            with open(abs_path, 'rb') as f:
-                file_content = f.read()
-            
-            self.send_response(200)
-            self.send_header('Content-Type', content_type)
-            self.send_header('Content-Length', len(file_content))
-            self.end_headers()
-            self.wfile.write(file_content)
-            
-        except FileNotFoundError:
-            self.send_error(404, f"File {filename} not found")
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-            # Client disconnected - log quietly and continue
-            logger.debug(f"Client disconnected while serving {filename}")
-        except Exception as e:
-            logger.error(f"Error serving file {filename}: {e}")
-            try:
-                self.send_error(500, "Internal server error")
-            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-                # Client already disconnected, ignore
-                pass
+    return app
 
 
-class HTTPSServer:
-    """HTTPS server for the teleoperation API."""
+class UnifiedServer:
+    """FastAPI/Uvicorn server for the teleoperation API and WebSocket."""
     
     def __init__(self, config: TelegripConfig):
         self.config = config
-        self.httpd = None
-        self.server_thread = None
-        self.system_ref = None  # Direct reference to the main system
+        self.server = None
+        self.system_ref = None
     
     def set_system_ref(self, system_ref):
         """Set reference to the main teleoperation system."""
         self.system_ref = system_ref
     
     async def start(self):
-        """Start the HTTPS server."""
+        """Start the FastAPI server."""
         try:
-            # Create server - directly use APIHandler class
-            self.httpd = http.server.HTTPServer((self.config.host_ip, self.config.https_port), APIHandler)
+            app = create_app(self.system_ref)
+            config = uvicorn.Config(
+                app, 
+                host=self.config.host_ip, 
+                port=self.config.port, 
+                log_level=self.config.log_level.lower()
+            )
+            self.server = uvicorn.Server(config)
             
-            # Set API handler reference for command queuing
-            self.httpd.api_handler = self.system_ref
+            # Start uvicorn in a separate thread because its run() is blocking
+            # or we can use serve() if we are in an async context.
+            # However, we want it to run as part of the system's tasks.
+            # So we'll return a task that runs the server.
+            asyncio.create_task(self.server.serve())
             
-            # Setup SSL
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            # Get absolute paths for SSL certificates
-            cert_path, key_path = self.config.get_absolute_ssl_paths()
-            context.load_cert_chain(cert_path, key_path)
-            self.httpd.socket = context.wrap_socket(self.httpd.socket, server_side=True)
-            
-            # Start server in a separate thread
-            self.server_thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
-            self.server_thread.start()
-            
-            # Only log if INFO level or more verbose
-            if getattr(logging, self.config.log_level.upper()) <= logging.INFO:
-                host_display = get_local_ip() if self.config.host_ip == "0.0.0.0" else self.config.host_ip
-                logger.info(f"HTTPS server started on https://{host_display}:{self.config.https_port}")
+            logger.info(f"Server running on {self.config.host_ip}:{self.config.port}")
             
         except Exception as e:
-            logger.error(f"Failed to start HTTPS server: {e}")
+            logger.error(f"Failed to start Unified server: {e}")
             raise
     
     async def stop(self):
-        """Stop the HTTPS server."""
-        if self.httpd:
-            self.httpd.shutdown()
-            if self.server_thread:
-                self.server_thread.join(timeout=5)
-            logger.info("HTTPS server stopped")
+        """Stop the server."""
+        if self.server:
+            self.server.should_exit = True
+            logger.info("Unified server stopped")
 
 
 class TelegripSystem:
@@ -475,13 +295,13 @@ class TelegripSystem:
         self.control_commands_queue = queue.Queue(maxsize=10)  # Thread-safe queue
         
         # Components
-        self.https_server = HTTPSServer(config)
+        self.server = UnifiedServer(config)
         self.vr_server = VRWebSocketServer(self.command_queue, config)
         self.web_keyboard_handler = WebKeyboardHandler(self.command_queue, config)
         self.control_loop = ControlLoop(self.command_queue, config, self.control_commands_queue)
 
         # Set system reference for API calls
-        self.https_server.set_system_ref(self)
+        self.server.set_system_ref(self)
 
         # Set up cross-references
         self.control_loop.web_keyboard_handler = self.web_keyboard_handler
@@ -597,7 +417,9 @@ class TelegripSystem:
             await self.control_loop.stop()
             await self.web_keyboard_handler.stop()
             await self.vr_server.stop()
-            # Don't stop HTTPS server - keep it running for the UI
+            # Don't stop Unified server - keep it running for the UI if possible, 
+            # though FastAPI might need restart if system state changed significantly.
+            # For now, let's keep it running.
 
             # Wait a moment for cleanup
             await asyncio.sleep(1)
@@ -673,10 +495,10 @@ class TelegripSystem:
             # Store reference to the main event loop for restart functionality
             self.main_loop = asyncio.get_event_loop()
             
-            # Start HTTPS server
-            await self.https_server.start()
+            # Start Unified server
+            await self.server.start()
             
-            # Start VR WebSocket server
+            # Start VR WebSocket logic
             await self.vr_server.start()
 
             # Start web keyboard handler
@@ -730,8 +552,8 @@ class TelegripSystem:
         except OSError as e:
             if e.errno == 98:  # Address already in use
                 logger.error(f"Error starting teleoperation system: {e}")
-                logger.error(f"To find and kill the process using these ports, run:")
-                logger.error(f"  kill -9 $(lsof -t -i:{self.config.https_port} -i:{self.config.websocket_port})")
+                logger.error(f"To find and kill the process using this port, run:")
+                logger.error(f"  kill -9 $(lsof -t -i:{self.config.port})")
             else:
                 logger.error(f"Error starting teleoperation system: {e}")
             await self.stop()
@@ -797,11 +619,11 @@ class TelegripSystem:
                 logger.warning(f"Error stopping recorder: {e}")
 
         try:
-            await asyncio.wait_for(self.https_server.stop(), timeout=2.0)
+            await asyncio.wait_for(self.server.stop(), timeout=2.0)
         except asyncio.TimeoutError:
-            logger.warning("HTTPS server stop timed out")
+            logger.warning("Unified server stop timed out")
         except Exception as e:
-            logger.warning(f"Error stopping HTTPS server: {e}")
+            logger.warning(f"Error stopping Unified server: {e}")
 
         logger.info("Teleoperation system shutdown complete")
 
@@ -830,7 +652,7 @@ def parse_arguments():
     parser.add_argument("--no-viz", action="store_true", help="Disable PyBullet visualization (headless mode)")
     parser.add_argument("--no-vr", action="store_true", help="Disable VR WebSocket server")
     parser.add_argument("--no-keyboard", action="store_true", help="Disable keyboard input")
-    parser.add_argument("--no-https", action="store_true", help="Disable HTTPS server")
+    parser.add_argument("--no-server", action="store_true", help="Disable Unified server")
     parser.add_argument("--ros2", action="store_true", help="Stream VR/teleop commands to ROS2 (TF2 + topics) as canonical transform broker")
     parser.add_argument("--autoconnect", action="store_true", help="Automatically connect to robot motors on startup")
     parser.add_argument("--record", action="store_true", help="Record VR inputs and robot goals (LeRobot/ROS2 comparable format)")
@@ -842,8 +664,7 @@ def parse_arguments():
                        help="Set logging level (default: warning)")
     
     # Network settings
-    parser.add_argument("--https-port", type=int, default=8443, help="HTTPS server port")
-    parser.add_argument("--ws-port", type=int, default=8442, help="WebSocket server port")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)), help="Server port")
     parser.add_argument("--host", default="0.0.0.0", help="Host IP address")
     
     # Paths
@@ -877,8 +698,7 @@ def create_config_from_args(args) -> TelegripConfig:
     config.digital_twin_enabled = args.digital_twin
     config.log_level = args.log_level
     
-    config.https_port = args.https_port
-    config.websocket_port = args.ws_port
+    config.port = args.port
     config.host_ip = args.host
     
     config.urdf_path = args.urdf
@@ -922,8 +742,6 @@ async def main():
             format='%(message)s'
         )
 
-    # Suppress noisy websockets library logging (invalid HTTP requests to WS port)
-    logging.getLogger('websockets').setLevel(logging.WARNING)
 
     config = create_config_from_args(args)
 
@@ -941,15 +759,10 @@ async def main():
         logger.info(f"  VR: {'enabled' if config.enable_vr else 'disabled'}")
         logger.info(f"  Keyboard: {'enabled' if config.enable_keyboard else 'disabled'}")
         logger.info(f"  Auto-connect: {'enabled' if config.autoconnect else 'disabled'}")
-        logger.info(f"  HTTPS Port: {config.https_port}")
-        logger.info(f"  WebSocket Port: {config.websocket_port}")
-        logger.info(f"  Robot Ports: {config.follower_ports}")
-    else:
-        # Show clean startup message with HTTPS URL
-        host_display = get_local_ip() if config.host_ip == "0.0.0.0" else config.host_ip
+        # Show clean startup message
         print(f"🤖 telegrip starting...")
-        print(f"📱 Open the UI in your browser on:")
-        print(f"   https://{host_display}:{config.https_port}")
+        print(f"📱 Server running on {config.host_ip}:{config.port}")
+        print(f"📱 Open the UI in your browser")
         print(f"📱 Then go to the same address on your VR headset browser")
         print(f"💡 Use --log-level info to see detailed output")
         print()

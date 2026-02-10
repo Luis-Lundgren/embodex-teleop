@@ -35,12 +35,11 @@ function populateSettingsForm(config) {
   document.getElementById('leftArmPort').value = config.robot?.left_arm?.port || '';
   document.getElementById('rightArmName').value = config.robot?.right_arm?.name || '';
   document.getElementById('rightArmPort').value = config.robot?.right_arm?.port || '';
-  
+
   // Network settings
-  document.getElementById('httpsPort').value = config.network?.https_port || '';
-  document.getElementById('websocketPort').value = config.network?.websocket_port || '';
+  document.getElementById('serverPort').value = config.network?.port || '';
   document.getElementById('hostIp').value = config.network?.host_ip || '';
-  
+
   // Control parameters
   document.getElementById('vrScale').value = config.robot?.vr_to_robot_scale || '';
   document.getElementById('sendInterval').value = (config.robot?.send_interval * 1000) || ''; // Convert to ms
@@ -63,34 +62,34 @@ function restartSystem() {
       'Content-Type': 'application/json'
     }
   })
-  .then(response => {
-    if (response.ok) {
-      // Show restart message and close modal
-      alert('System is restarting... The page will reload automatically in a few seconds.');
-      closeSettings();
-      
-      // Try to reconnect after a delay
-      setTimeout(() => {
-        window.location.reload();
-      }, 5000);
-    } else {
-      alert('Failed to restart system. Please restart manually.');
-    }
-  })
-  .catch(error => {
-    console.error('Error restarting system:', error);
-    alert('Error communicating with server. Please restart manually.');
-  })
-  .finally(() => {
-    restartButton.disabled = false;
-    restartButton.textContent = '🔄 Restart System';
-  });
+    .then(response => {
+      if (response.ok) {
+        // Show restart message and close modal
+        alert('System is restarting... The page will reload automatically in a few seconds.');
+        closeSettings();
+
+        // Try to reconnect after a delay
+        setTimeout(() => {
+          window.location.reload();
+        }, 5000);
+      } else {
+        alert('Failed to restart system. Please restart manually.');
+      }
+    })
+    .catch(error => {
+      console.error('Error restarting system:', error);
+      alert('Error communicating with server. Please restart manually.');
+    })
+    .finally(() => {
+      restartButton.disabled = false;
+      restartButton.textContent = '🔄 Restart System';
+    });
 }
 
 function saveConfiguration() {
   const form = document.getElementById('settingsForm');
   const formData = new FormData(form);
-  
+
   // Build config object
   const updatedConfig = {
     robot: {
@@ -108,8 +107,7 @@ function saveConfiguration() {
       send_interval: parseFloat(formData.get('sendInterval')) / 1000 // Convert from ms
     },
     network: {
-      https_port: parseInt(formData.get('httpsPort')),
-      websocket_port: parseInt(formData.get('websocketPort')),
+      port: parseInt(formData.get('serverPort')),
       host_ip: formData.get('hostIp')
     },
     control: {
@@ -131,22 +129,22 @@ function saveConfiguration() {
     },
     body: JSON.stringify(updatedConfig)
   })
-  .then(response => response.json())
-  .then(data => {
-    if (data.success) {
-      alert('Configuration saved successfully! Use the restart button to apply changes.');
-    } else {
-      alert('Failed to save configuration: ' + (data.error || 'Unknown error'));
-    }
-  })
-  .catch(error => {
-    console.error('Error saving configuration:', error);
-    alert('Error saving configuration');
-  })
-  .finally(() => {
-    saveButton.disabled = false;
-    saveButton.textContent = '💾 Save Configuration';
-  });
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        alert('Configuration saved successfully! Use the restart button to apply changes.');
+      } else {
+        alert('Failed to save configuration: ' + (data.error || 'Unknown error'));
+      }
+    })
+    .catch(error => {
+      console.error('Error saving configuration:', error);
+      alert('Error saving configuration');
+    })
+    .finally(() => {
+      saveButton.disabled = false;
+      saveButton.textContent = '💾 Save Configuration';
+    });
 }
 
 // Update status indicators
@@ -158,21 +156,21 @@ function updateStatus() {
       const leftIndicator = document.getElementById('leftArmStatus');
       const rightIndicator = document.getElementById('rightArmStatus');
       const vrIndicator = document.getElementById('vrStatus');
-      
+
       leftIndicator.className = 'status-indicator' + (data.left_arm_connected ? ' connected' : '');
       rightIndicator.className = 'status-indicator' + (data.right_arm_connected ? ' connected' : '');
       vrIndicator.className = 'status-indicator' + (data.vrConnected ? ' connected' : '');
-      
+
       // Update keyboard control status
       isKeyboardEnabled = data.keyboardEnabled;
       const keyboardHelp = document.querySelector('.keyboard-help');
-      
+
       if (isKeyboardEnabled) {
         if (keyboardHelp) keyboardHelp.classList.add('active');
       } else {
         if (keyboardHelp) keyboardHelp.classList.remove('active');
       }
-      
+
       // Update robot engagement status
       if (data.robotEngaged !== undefined) {
         isRobotEngaged = data.robotEngaged;
@@ -238,7 +236,7 @@ function showConnectionWarning() {
 
 function toggleRobotEngagement() {
   const action = isRobotEngaged ? 'disconnect' : 'connect';
-  
+
   fetch('/api/robot', {
     method: 'POST',
     headers: {
@@ -246,25 +244,25 @@ function toggleRobotEngagement() {
     },
     body: JSON.stringify({ action: action })
   })
-  .then(response => response.json())
-  .then(data => {
-    if (data.success) {
-      isRobotEngaged = !isRobotEngaged;
-      updateEngagementUI();
-    } else {
-      alert('Failed to ' + action + ' robot: ' + (data.error || 'Unknown error'));
-    }
-  })
-  .catch(error => {
-    console.error('Error toggling robot engagement:', error);
-    alert('Error communicating with server');
-  });
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        isRobotEngaged = !isRobotEngaged;
+        updateEngagementUI();
+      } else {
+        alert('Failed to ' + action + ' robot: ' + (data.error || 'Unknown error'));
+      }
+    })
+    .catch(error => {
+      console.error('Error toggling robot engagement:', error);
+      alert('Error communicating with server');
+    });
 }
 
 // Toggle keyboard control
 function toggleKeyboardControl() {
   const action = isKeyboardEnabled ? 'disable' : 'enable';
-  
+
   fetch('/api/keyboard', {
     method: 'POST',
     headers: {
@@ -272,25 +270,25 @@ function toggleKeyboardControl() {
     },
     body: JSON.stringify({ action: action })
   })
-  .then(response => response.json())
-  .then(data => {
-    if (data.success) {
-      isKeyboardEnabled = !isKeyboardEnabled;
-      const keyboardHelp = document.querySelector('.keyboard-help');
-      
-      if (isKeyboardEnabled) {
-        if (keyboardHelp) keyboardHelp.classList.add('active');
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        isKeyboardEnabled = !isKeyboardEnabled;
+        const keyboardHelp = document.querySelector('.keyboard-help');
+
+        if (isKeyboardEnabled) {
+          if (keyboardHelp) keyboardHelp.classList.add('active');
+        } else {
+          if (keyboardHelp) keyboardHelp.classList.remove('active');
+        }
       } else {
-        if (keyboardHelp) keyboardHelp.classList.remove('active');
+        alert('Failed to toggle keyboard control: ' + (data.error || 'Unknown error'));
       }
-    } else {
-      alert('Failed to toggle keyboard control: ' + (data.error || 'Unknown error'));
-    }
-  })
-  .catch(error => {
-    console.error('Error toggling keyboard control:', error);
-    alert('Error communicating with server');
-  });
+    })
+    .catch(error => {
+      console.error('Error toggling keyboard control:', error);
+      alert('Error communicating with server');
+    });
 }
 
 // Check if running in VR/AR mode
@@ -360,10 +358,10 @@ function handleKeyUp(event) {
   if (isControlKey(event.code)) {
     event.preventDefault();
   }
-  
+
   // Only handle keys if keyboard control is enabled
   if (!isKeyboardEnabled || !pressedKeys.has(event.code)) return;
-  
+
   if (isControlKey(event.code)) {
     pressedKeys.delete(event.code);
     sendKeyCommand(event.code, 'release');
@@ -424,34 +422,34 @@ function sendKeyCommand(keyCode, action) {
     headers: {
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ 
-      key: key, 
-      action: action 
+    body: JSON.stringify({
+      key: key,
+      action: action
     })
   })
-  .catch(error => {
-    console.error('Error sending key command:', error);
-  });
+    .catch(error => {
+      console.error('Error sending key command:', error);
+    });
 }
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
   updateUIForDevice();
-  
+
   // Start status monitoring
   updateStatus();
   setInterval(updateStatus, 2000); // Update every 2 seconds
-  
+
   // Handle VR mode changes
   document.addEventListener('fullscreenchange', updateUIForDevice);
-  
+
   // VR session detection
   if (navigator.xr) {
     navigator.xr.addEventListener('sessionstart', () => {
       updateStatus();
       updateUIForDevice();
     });
-    
+
     navigator.xr.addEventListener('sessionend', () => {
       updateStatus();
       updateUIForDevice();

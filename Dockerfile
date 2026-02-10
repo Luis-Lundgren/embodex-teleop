@@ -34,11 +34,9 @@ COPY reference_poses.json .
 # Create directory for recordings
 RUN mkdir -p records
 
-# Expose ports
-# 8443: HTTPS API and UI
-# 8442: WebSocket for VR/Teleop
-EXPOSE 8443
-EXPOSE 8442
+# Expose port (Railway will override this with PORT environment variable)
+ENV PORT=8000
+EXPOSE 8000
 
 # Ensure python output is streamed directly to terminal
 ENV PYTHONUNBUFFERED=1

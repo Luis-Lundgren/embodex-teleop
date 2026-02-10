@@ -5,10 +5,11 @@
 numpy
 scipy
 pybullet
-websockets
 pynput
 pandas
 pyarrow
+fastapi
+uvicorn[standard]
 # For development
 pytest
 black

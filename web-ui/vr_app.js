@@ -33,10 +33,9 @@ AFRAME.registerComponent('controller-updater', {
     this.leftZAxisRotation = 0;
     this.rightZAxisRotation = 0;
 
-    // --- Get hostname dynamically ---
-    const serverHostname = window.location.hostname;
-    const websocketPort = 8442; // Make sure this matches controller_server.py
-    const websocketUrl = `wss://${serverHostname}:${websocketPort}`;
+    // --- Get WebSocket URL dynamically ---
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const websocketUrl = `${wsProtocol}//${window.location.host}/ws`;
     console.log(`Attempting WebSocket connection to: ${websocketUrl}`);
     // !!! IMPORTANT: Replace 'YOUR_LAPTOP_IP' with the actual IP address of your laptop !!!
     // const websocketUrl = 'ws://YOUR_LAPTOP_IP:8442';

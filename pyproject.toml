@@ -13,13 +13,14 @@ keywords = ["robotics", "teleoperation", "vr", "robot-control"]
 
 dependencies = [
     "numpy",
-    "websockets",
     "pynput",
     "pybullet",
     "scipy",
     "pyyaml",
     "pandas",
     "pyarrow",
+    "fastapi",
+    "uvicorn[standard]",
 ]
 
 requires-python = ">=3.8"

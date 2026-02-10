@@ -17,8 +17,7 @@ logger = logging.getLogger(__name__)
 # Default configuration values (fallback if YAML file doesn't exist)
 DEFAULT_CONFIG = {
     "network": {
-        "https_port": 8443,
-        "websocket_port": 8442,
+        "port": int(os.environ.get("PORT", 8000)),
         "host_ip": "0.0.0.0"
     },
     "ssl": {
@@ -130,8 +129,7 @@ def _deep_merge(base: dict, update: dict):
 _config_data = load_config()
 
 # Extract values for backward compatibility
-HTTPS_PORT = _config_data["network"]["https_port"]
-WEBSOCKET_PORT = _config_data["network"]["websocket_port"]
+PORT = _config_data["network"].get("port", int(os.environ.get("PORT", 8000)))
 HOST_IP = _config_data["network"]["host_ip"]
 
 CERTFILE = _config_data["ssl"]["certfile"]
@@ -210,8 +208,7 @@ class TelegripConfig:
     """Main configuration class for the teleoperation system."""
     
     # Network settings
-    https_port: int = HTTPS_PORT
-    websocket_port: int = WEBSOCKET_PORT
+    port: int = PORT
     host_ip: str = HOST_IP
     
     # SSL settings

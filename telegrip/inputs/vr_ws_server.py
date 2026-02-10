@@ -6,7 +6,6 @@ Adapted from the original vr_robot_teleop.py script.
 import asyncio
 import json
 import ssl
-import websockets
 import numpy as np
 import math
 import logging
@@ -90,106 +89,35 @@ class VRWebSocketServer(BaseInputProvider):
             except Exception:
                 return "localhost"
 
-    def setup_ssl(self) -> Optional[ssl.SSLContext]:
-        """Setup SSL context for WebSocket server."""
-        # Automatically generate SSL certificates if they don't exist
-        if not self.config.ssl_files_exist:
-            logger.info("SSL certificates not found for WebSocket server, attempting to generate them...")
-            if not self.config.ensure_ssl_certificates():
-                logger.error("Failed to generate SSL certificates for WebSocket server")
-                return None
-        
-        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        try:
-            # Get absolute paths for SSL certificates
-            cert_path, key_path = self.config.get_absolute_ssl_paths()
-            ssl_context.load_cert_chain(certfile=cert_path, keyfile=key_path)
-            logger.info("SSL certificate and key loaded successfully for WebSocket server")
-            return ssl_context
-        except ssl.SSLError as e:
-            logger.error(f"Error loading SSL cert/key: {e}")
-            return None
-    
+
     async def start(self):
-        """Start the WebSocket server."""
-        if not self.config.enable_vr:
-            logger.info("VR WebSocket server disabled in configuration")
-            return
-        
-        ssl_context = self.setup_ssl()
-        if ssl_context is None:
-            logger.error("Failed to setup SSL for WebSocket server")
-            return
-        
-        host = self.config.host_ip
-        port = self.config.websocket_port
-        self._browser_warning_shown = False
-
-        try:
-            self.server = await websockets.serve(
-                self.websocket_handler,
-                host,
-                port,
-                ssl=ssl_context,
-                process_request=self._process_request
-            )
-            self.is_running = True
-            host_display = self._get_local_ip() if host == "0.0.0.0" else host
-            logger.info(f"VR WebSocket server running on wss://{host_display}:{port}")
-        except Exception as e:
-            logger.error(f"Failed to start WebSocket server: {e}")
-
-    async def _process_request(self, connection, request):
-        """Process incoming requests and detect browser visits to the WebSocket port."""
-        # Check if this looks like a browser request (not a proper WebSocket upgrade)
-        # In newer websockets versions, request.headers is a Headers object
-        headers = request.headers
-        connection_header = headers.get("Connection", "")
-        upgrade_header = headers.get("Upgrade", "")
-
-        # Proper WebSocket requests have "Upgrade" in Connection header and "websocket" in Upgrade header
-        is_websocket_request = (
-            "upgrade" in connection_header.lower() and
-            "websocket" in upgrade_header.lower()
-        )
-
-        if not is_websocket_request:
-            # Only show warning once to avoid spam
-            if not self._browser_warning_shown:
-                self._browser_warning_shown = True
-                host_display = self._get_local_ip() if self.config.host_ip == "0.0.0.0" else self.config.host_ip
-                print(f"\n⚠️  Someone is trying to open port {self.config.websocket_port} in a browser.")
-                print(f"   This port is for VR WebSocket connections only.")
-                print(f"   The web UI is at: https://{host_display}:{self.config.https_port}\n")
-
-        # Return None to let websockets library handle the request normally
-        # (it will reject non-WebSocket requests with 426 Upgrade Required)
-        return None
+        """Start the WebSocket server (legacy, now managed by FastAPI)."""
+        logger.info("VR WebSocket logic initialized (FastAPI will handle the server)")
+        self.is_running = True
 
     async def stop(self):
         """Stop the WebSocket server."""
         self.is_running = False
-
-        # Close all active client connections to unblock websocket_handler
+        # Close all active client connections
         for client in list(self.clients):
             try:
-                await client.close()
+                # This works for both websockets library and FastAPI WebSocket
+                if hasattr(client, 'close'):
+                    await client.close()
             except Exception:
                 pass
+        logger.info("VR WebSocket logic stopped")
 
-        if self.server:
-            self.server.close()
-            await self.server.wait_closed()
-            logger.info("VR WebSocket server stopped")
-    
-    async def websocket_handler(self, websocket, path=None):
-        """Handle WebSocket connections from VR controllers."""
-        client_address = websocket.remote_address
+    async def fastapi_handler(self, websocket):
+        """Handle WebSocket connections from VR controllers via FastAPI."""
+        await websocket.accept()
+        client_address = f"{websocket.client.host}:{websocket.client.port}"
         logger.info(f"VR client connected: {client_address}")
         self.clients.add(websocket)
         
         try:
-            async for message in websocket:
+            while True:
+                message = await websocket.receive_text()
                 try:
                     data = json.loads(message)
                     if data.get('action') == 'record_toggle':
@@ -206,12 +134,9 @@ class VRWebSocketServer(BaseInputProvider):
                 except Exception as e:
                     logger.error(f"Error processing VR data: {e}")
         
-        except websockets.exceptions.ConnectionClosedOK:
-            logger.info(f"VR client {client_address} disconnected normally")
-        except websockets.exceptions.ConnectionClosedError as e:
-            logger.warning(f"VR client {client_address} disconnected with error: {e}")
         except Exception as e:
-            logger.error(f"Unexpected error with VR client {client_address}: {e}")
+            # FastAPI raises various exceptions on disconnect
+            logger.info(f"VR client {client_address} disconnected: {e}")
         finally:
             self.clients.discard(websocket)
             # Handle grip releases when client disconnects
@@ -219,6 +144,7 @@ class VRWebSocketServer(BaseInputProvider):
             await self.handle_grip_release('right')
             logger.info(f"VR client {client_address} cleanup complete")
     
+
     async def process_controller_data(self, data: Dict):
         """Process incoming VR controller data."""
         
@@ -510,6 +436,6 @@ class VRWebSocketServer(BaseInputProvider):
         
         # Broadcast to all clients
         await asyncio.gather(
-            *[client.send(encoded_message) for client in self.clients],
+            *[client.send_text(encoded_message) for client in self.clients],
             return_exceptions=True
         )
