@@ -307,6 +307,22 @@ class TeleopRecorder:
         with open(json_path, "w") as f:
             json.dump(data, f, indent=2, default=_json_default)
         logger.info("Wrote Motion Exchange JSON: %s", json_path)
+        
+        # Save to Cloud DB (async/background)
+        try:
+            from .database import save_session_sync
+            db_thread = save_session_sync(episode_name, data, robot="so100")
+            if db_thread:
+                logger.info("Waiting for DB save to complete...")
+                db_thread.join(timeout=10.0)
+                if db_thread.is_alive():
+                    logger.warning("DB save timed out but continuing shutdown.")
+                else:
+                    logger.info("DB save completed successfully.")
+        except ImportError:
+            logger.warning("Could not import database handler. Skipping DB save.")
+        except Exception as e:
+            logger.error(f"Error triggering DB save: {e}")
 
 
 def _json_default(obj):

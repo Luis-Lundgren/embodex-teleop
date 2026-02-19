@@ -31,6 +31,10 @@ COPY web-ui ./web-ui
 COPY config.yaml .
 COPY reference_poses.json .
 
+# Copy prisma schema and generate client
+COPY prisma ./prisma
+RUN prisma generate --schema=./prisma/schema.prisma
+
 # Create directory for recordings
 RUN mkdir -p records
 
