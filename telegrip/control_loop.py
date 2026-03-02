@@ -359,6 +359,11 @@ class ControlLoop:
         if (goal.metadata and goal.metadata.get("record_reset")):
             await self._reset_recording()
             return
+
+        # Handle robot reset from VR disconnect
+        if (goal.metadata and goal.metadata.get("robot_reset")):
+            await self._reset_robot()
+            return
         
         # Handle mode changes (only if mode is specified)
         if goal.mode is not None and goal.mode != arm_state.mode:
@@ -603,6 +608,15 @@ class ControlLoop:
             logger.info("🎬 Resetting single session recording state for next connection.")
             self._recording_finalized = False
             self.record_session_dir = None
+
+    async def _reset_robot(self):
+        """Disengage and home the robot after a session."""
+        if self.robot_interface:
+            logger.info("🎬 Homing and disengaging robot (session refresh)...")
+            self.robot_interface.disengage()
+            self.left_arm.reset()
+            self.right_arm.reset()
+            logger.info("✅ Robot reset complete")
     
     def _periodic_logging(self):
         """Log status information periodically."""

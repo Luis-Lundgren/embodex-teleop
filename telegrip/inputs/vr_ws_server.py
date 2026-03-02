@@ -143,12 +143,26 @@ class VRWebSocketServer(BaseInputProvider):
             await self.handle_grip_release('left')
             await self.handle_grip_release('right')
             
-            # If no more clients, signal control loop to reset recording state
+            # If no more clients, signal control loop to reset recording state and robot
             if not self.clients:
-                logger.info("🎬 Last VR client disconnected, resetting recording state")
+                logger.info("🎬 Last VR client disconnected, resetting recording state and robot")
+                
+                # Signal recording reset
                 await self.command_queue.put(ControlGoal(
                     arm="left",
                     metadata={"record_reset": True},
+                ))
+                
+                # Signal robot disconnect (which homes and disengages motors)
+                # Instead of putting it in command_queue (which is for ControlGoals),
+                # we should use the system's add_control_command if we had a reference,
+                # but VRWebSocketServer usually only has the command_queue.
+                # However, ControlLoop can also handle special metadata in ControlGoal
+                # or we can pass a special goal.
+                
+                await self.command_queue.put(ControlGoal(
+                    arm="left",
+                    metadata={"robot_reset": True},
                 ))
             
             logger.info(f"VR client {client_address} cleanup complete")
