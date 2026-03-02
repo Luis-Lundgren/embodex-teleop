@@ -355,6 +355,11 @@ class ControlLoop:
             await self._toggle_recording()
             return
         
+        # Handle recording reset from VR disconnect
+        if (goal.metadata and goal.metadata.get("record_reset")):
+            await self._reset_recording()
+            return
+        
         # Handle mode changes (only if mode is specified)
         if goal.mode is not None and goal.mode != arm_state.mode:
             if goal.mode == ControlMode.POSITION_CONTROL:
@@ -584,7 +589,20 @@ class ControlLoop:
                 self.recorder.start(new_dir=new_dir)
             
             # Log to console for visual feedback on host
+            print(f"Record single session set to {self.record_single_session}")
             print(f"📼 Recording STARTED: {new_dir}")
+
+    async def _reset_recording(self):
+        """Reset recording state to allow a new session if record_single_session is enabled."""
+        if self.recorder and self.recorder.is_running():
+            logger.info("🎬 Forcing stop of recording (reset/disconnect)...")
+            self.recorder.stop()
+            print(f"📼 Recording STOPPED (disconnect): {self.recorder.record_dir}")
+        
+        if self.record_single_session:
+            logger.info("🎬 Resetting single session recording state for next connection.")
+            self._recording_finalized = False
+            self.record_session_dir = None
     
     def _periodic_logging(self):
         """Log status information periodically."""

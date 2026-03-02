@@ -142,6 +142,15 @@ class VRWebSocketServer(BaseInputProvider):
             # Handle grip releases when client disconnects
             await self.handle_grip_release('left')
             await self.handle_grip_release('right')
+            
+            # If no more clients, signal control loop to reset recording state
+            if not self.clients:
+                logger.info("🎬 Last VR client disconnected, resetting recording state")
+                await self.command_queue.put(ControlGoal(
+                    arm="left",
+                    metadata={"record_reset": True},
+                ))
+            
             logger.info(f"VR client {client_address} cleanup complete")
     
 
