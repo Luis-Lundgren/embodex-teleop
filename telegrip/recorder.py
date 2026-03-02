@@ -268,8 +268,7 @@ class TeleopRecorder:
         ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         episode_name = f"teleop_{ts_str}"
         
-        # We assume left arm for now as it's the primary focus of TeleGrip
-        joint_names = ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"]
+        from .config import JOINT_NAMES, GRIPPER_CLOSED_ANGLE
         
         timestamps = []
         joint_positions = []
@@ -280,13 +279,19 @@ class TeleopRecorder:
         for frame in self._lerobot_frames:
             timestamps.append(frame["timestamp"] - t0)
             # action is [j1, j2, j3, j4, j5, j6] (degrees)
-            # Gripper state for SO-100 is joint 6 (index 5)
             full_joints = frame["action"]
+            
+            # Record all joints in joint_positions (including gripper)
+            joint_positions.append(full_joints)
+            
+            # Also provide a separate normalized gripper field (0-1)
             if len(full_joints) >= 6:
-                joint_positions.append(full_joints[:5]) # j1-j5
-                gripper_states.append(full_joints[5])   # j6 (gripper)
+                # Normalize based on config CLOSED angle
+                val = float(full_joints[5])
+                # gripper_states expects 0 (open) to 1 (closed)
+                normalized_gripper = min(1.0, max(0.0, val / GRIPPER_CLOSED_ANGLE)) if GRIPPER_CLOSED_ANGLE > 0 else (1.0 if val > 20 else 0.0)
+                gripper_states.append(normalized_gripper)
             else:
-                joint_positions.append(full_joints)
                 gripper_states.append(0.0)
 
         data = {
@@ -295,7 +300,7 @@ class TeleopRecorder:
                 {
                     "id": episode_name,
                     "timestamps": timestamps,
-                    "joint_names": joint_names[:5],
+                    "joint_names": JOINT_NAMES,
                     "joint_positions": joint_positions,
                     "gripper": gripper_states,
                     "source": "teleop"

@@ -244,7 +244,7 @@ class VRWebSocketServer(BaseInputProvider):
             # Reverse behavior: gripper open by default, closes when trigger pressed
             gripper_goal = ControlGoal(
                 arm=hand,
-                gripper_closed=not trigger_active,  # Inverted: closed when trigger NOT active
+                gripper_closed=trigger_active,  # Closed when trigger pressed
                 metadata={"source": "vr_trigger"}
             )
             await self.send_goal(gripper_goal)
@@ -355,10 +355,10 @@ class VRWebSocketServer(BaseInputProvider):
         if controller.trigger_active:
             controller.trigger_active = False
             
-            # Send gripper closed goal - reversed behavior: gripper closes when trigger released
+            # Reversed behavior: gripper open by default, opens when trigger released
             goal = ControlGoal(
                 arm=hand,
-                gripper_closed=True,  # Close gripper when trigger released
+                gripper_closed=False,  # Open gripper when trigger released
                 metadata={"source": "vr_trigger_release"}
             )
             await self.send_goal(goal)
