@@ -240,16 +240,15 @@ class VRWebSocketServer(BaseInputProvider):
         if trigger_active != controller.trigger_active:
             controller.trigger_active = trigger_active
             
-            # Send gripper control goal - do not specify mode to avoid interfering with position control
-            # Reverse behavior: gripper open by default, closes when trigger pressed
+            # Gripper control: closes when trigger pressed, open by default
             gripper_goal = ControlGoal(
                 arm=hand,
-                gripper_closed=trigger_active,  # Closed when trigger pressed
+                gripper_closed=not trigger_active,  # Inverted: closed when trigger pressed
                 metadata={"source": "vr_trigger"}
             )
             await self.send_goal(gripper_goal)
             
-            logger.info(f"🤏 {hand.upper()} gripper {'OPENED' if trigger_active else 'CLOSED'}")
+            logger.info(f"🤏 {hand.upper()} gripper {'CLOSED' if trigger_active else 'OPENED'}")
         
         # Handle grip button for arm movement control
         if grip_active:
@@ -355,15 +354,15 @@ class VRWebSocketServer(BaseInputProvider):
         if controller.trigger_active:
             controller.trigger_active = False
             
-            # Reversed behavior: gripper open by default, opens when trigger released
+            # Open gripper when trigger released
             goal = ControlGoal(
                 arm=hand,
-                gripper_closed=False,  # Open gripper when trigger released
+                gripper_closed=True,  # Open gripper when trigger released (matching inverted logic)
                 metadata={"source": "vr_trigger_release"}
             )
             await self.send_goal(goal)
             
-            logger.info(f"🤏 {hand.upper()} gripper CLOSED (trigger released)")
+            logger.info(f"🤏 {hand.upper()} gripper OPENED (trigger released)")
     
     def euler_to_quaternion(self, euler_deg: Dict[str, float]) -> np.ndarray:
         """Convert Euler angles in degrees to quaternion [x, y, z, w]."""
