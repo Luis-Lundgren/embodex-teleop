@@ -221,6 +221,7 @@ def create_app(system: 'TelegripSystem'):
             return JSONResponse(status_code=500, content={"error": str(e)})
 
     @app.websocket("/ws")
+    @app.websocket("/ws/")
     async def websocket_endpoint(websocket: WebSocket):
         if system.vr_server:
             await system.vr_server.fastapi_handler(websocket)
@@ -230,13 +231,31 @@ def create_app(system: 'TelegripSystem'):
     # Health check
     @app.get("/health")
     async def health():
-        return {"status": "ok"}
+        return {
+            "status": "ok",
+            "system_running": system.is_running,
+            "robot_engaged": system.control_loop.robot_interface.is_engaged if system.control_loop and system.control_loop.robot_interface else False
+        }
 
     # Serve static files from web-ui directory
     from .utils import get_absolute_path
     web_ui_path = get_absolute_path('web-ui')
+    
     if web_ui_path.exists():
-        app.mount("/", StaticFiles(directory=str(web_ui_path), html=True), name="static")
+        # Custom StaticFiles to handle websocket fallthrough gracefully
+        class SafeStaticFiles(StaticFiles):
+            async def __call__(self, scope, receive, send):
+                if scope["type"] != "http":
+                    # If this is not an HTTP request (e.g. websocket), 
+                    # we shouldn't be here if other routes matched.
+                    # Returning without error allows the ASGI server to handle it.
+                    if scope["type"] == "websocket":
+                        logger.warning(f"Websocket request to {scope['path']} fell through to StaticFiles")
+                        await send({"type": "websocket.close", "code": 1000})
+                    return
+                await super().__call__(scope, receive, send)
+
+        app.mount("/", SafeStaticFiles(directory=str(web_ui_path), html=True), name="static")
     
     return app
 
