@@ -23,7 +23,7 @@ services:
     container_name: telegrip-app
     restart: always
     ports:
-      - "${PORT:-8000}:8000"
+      - "${PORT:-8500}:8000"
     environment:
       - PORT=8000
       - DIRECT_URL=postgresql://${POSTGRES_USER:-telegrip}:${POSTGRES_PASSWORD:-telegrip_password}@db:5432/${POSTGRES_DB:-telegrip}?schema=public
