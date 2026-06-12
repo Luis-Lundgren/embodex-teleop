@@ -35,6 +35,14 @@ services:
       db:
         condition: service_healthy
 
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: telegrip-tunnel
+    restart: always
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - app
+
 volumes:
   postgres_data:
   records_data:

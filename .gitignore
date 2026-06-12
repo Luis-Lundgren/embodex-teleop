@@ -21,6 +21,7 @@ motion_exchange/datasets/
 config.yaml
 cert.pem
 key.pem
+.env
 
 # Build artifacts
 build/
