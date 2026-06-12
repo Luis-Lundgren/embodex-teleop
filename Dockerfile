@@ -17,7 +17,7 @@ WORKDIR /app
 # Copy requirement files first for better caching
 COPY requirements.txt .
 # Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --default-timeout=1000 --no-cache-dir -r requirements.txt
 
 # Copy the application source and assets
 COPY telegrip ./telegrip
@@ -38,12 +38,19 @@ RUN prisma generate --schema=./prisma/schema.prisma
 # Create directory for recordings
 RUN mkdir -p records
 
+# Copy entrypoint script and set executable permissions
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 # Expose port (Railway will override this with PORT environment variable)
 ENV PORT=8000
 EXPOSE 8000
 
 # Ensure python output is streamed directly to terminal
 ENV PYTHONUNBUFFERED=1
+
+# Set the entrypoint script to run on container startup
+ENTRYPOINT ["/app/entrypoint.sh"]
 
 # Default command as requested: no physical robot, digital twin enabled, recording active
 CMD ["telegrip", "--no-robot", "--digital-twin", "--record"]
