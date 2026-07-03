@@ -280,6 +280,10 @@
       <a-text id="rightHandInfo" value="Pos: ...\nRot: ..." position="0 0.04 -0.05" rotation="0 0 0"
         scale="0.05 0.05 0.05" color="white" align="center"></a-text>
     </a-entity>
+    <!-- Workspace table - Visible in desktop preview and VR -->
+    <a-entity id="workspace-table" position="-0.2 0.762 -0.5" visible="true">
+      <a-entity gltf-model="url(assets/other/table.glb)"></a-entity>
+    </a-entity>
     <!-- Digital Twin (SO-100 Left Arm) - Hidden by default, shown when data received -->
     <a-entity id="so100-robot-left" position="-0.2 0.762 -0.5" rotation="-90 180 0" visible="false">
       <!-- Base Visuals -->

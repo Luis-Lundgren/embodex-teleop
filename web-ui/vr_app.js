@@ -1,5 +1,18 @@
 // Wait for A-Frame scene to load
 
+function setEntityVisible(entity, visible) {
+  if (!entity) return;
+  entity.setAttribute('visible', visible);
+  entity.object3D.visible = visible;
+  entity.object3D.traverse((node) => {
+    node.visible = visible;
+  });
+}
+
+function showWorkspaceTable() {
+  setEntityVisible(document.querySelector('#workspace-table'), true);
+}
+
 AFRAME.registerComponent('controller-updater', {
   init: function () {
     console.log("Controller updater component initialized.");
@@ -70,7 +83,7 @@ AFRAME.registerComponent('controller-updater', {
             if (data.left_arm && data.left_arm.length >= 6) {
               const leftArmEntity = document.querySelector('#so100-robot-left');
               if (leftArmEntity && !leftArmEntity.getAttribute('visible')) {
-                leftArmEntity.setAttribute('visible', true);
+                setEntityVisible(leftArmEntity, true);
                 console.log("Showing Left Arm Digital Twin");
               }
 
@@ -601,15 +614,21 @@ document.addEventListener('DOMContentLoaded', (event) => {
       console.log('Controller DISCONNECTED:', evt.detail.name, evt.detail.component.data.hand);
     });
 
+    const initScene = () => {
+      showWorkspaceTable();
+      scene.setAttribute('controller-updater', '');
+      console.log('Workspace table shown and controller-updater added.');
+    };
+
+    scene.addEventListener('enter-vr', () => {
+      showWorkspaceTable();
+    });
+
     // Add controller-updater component when scene is loaded (A-Frame manages session)
     if (scene.hasLoaded) {
-      scene.setAttribute('controller-updater', '');
-      console.log("controller-updater component added immediately.");
+      initScene();
     } else {
-      scene.addEventListener('loaded', () => {
-        scene.setAttribute('controller-updater', '');
-        console.log("controller-updater component added after scene loaded.");
-      });
+      scene.addEventListener('loaded', initScene);
     }
   } else {
     console.error('A-Frame scene not found!');

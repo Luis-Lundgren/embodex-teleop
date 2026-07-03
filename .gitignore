@@ -13,6 +13,9 @@ __pycache__/
 htmlcov/
 .mypy_cache/
 
+#scripts
+scripts/
+
 # Recordings and local data
 records/
 motion_exchange/datasets/
