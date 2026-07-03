@@ -79,25 +79,30 @@ class TeleopRecorder:
         self._robot_goal_rows: List[Dict[str, Any]] = []
         self._lerobot_frames: List[Dict[str, Any]] = []
         self._running = False
+        self.session_id: Optional[str] = None
 
     def start(self, new_dir: Optional[Path] = None):
         """Start a new recording session."""
         with self._lock:
             if new_dir:
                 self.record_dir = Path(new_dir)
+            self.session_id = f"teleop_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             self._start_time = time.time()
             self._vr_raw = []
             self._robot_goal_rows = []
             self._lerobot_frames = []
             self._running = True
         self.record_dir.mkdir(parents=True, exist_ok=True)
-        logger.info("Recording started: %s", self.record_dir)
+        self._write_meta(started=True)
+        logger.info("Recording started: %s (session_id=%s)", self.record_dir, self.session_id)
 
-    def stop(self):
-        """Stop recording and flush to disk."""
+    def stop(self) -> Optional[str]:
+        """Stop recording and flush to disk. Returns the session_id."""
         with self._lock:
             self._running = False
+            session_id = self.session_id
         self._flush()
+        return session_id
 
     def is_running(self) -> bool:
         with self._lock:
@@ -206,21 +211,33 @@ class TeleopRecorder:
                     "action": action,
                 })
 
+    def _write_meta(self, started: bool = False):
+        """Write session metadata. Called at start and again on flush."""
+        t0 = self._start_time
+        meta = {
+            "session_id": self.session_id,
+            "record_dir": str(self.record_dir),
+            "fps": self.fps,
+            "vr_only": self.vr_only,
+            "start_time": t0,
+            "episode_index": self.episode_id,
+        }
+        if not started:
+            t1 = time.time()
+            meta.update({
+                "end_time": t1,
+                "duration_sec": t1 - t0 if t0 else 0,
+                "num_vr_raw": len(self._vr_raw),
+                "num_robot_goal_frames": len(self._robot_goal_rows),
+            })
+        with open(self.record_dir / "meta.json", "w") as f:
+            json.dump(meta, f, indent=2)
+
     def _flush(self):
         """Write all buffers to disk."""
         self.record_dir.mkdir(parents=True, exist_ok=True)
         t0 = self._start_time
         t1 = time.time()
-        meta = {
-            "fps": self.fps,
-            "vr_only": self.vr_only,
-            "start_time": t0,
-            "end_time": t1,
-            "duration_sec": t1 - t0 if t0 else 0,
-            "episode_index": self.episode_id,
-            "num_vr_raw": len(self._vr_raw),
-            "num_robot_goal_frames": len(self._robot_goal_rows),
-        }
 
         # vr_raw: JSONL
         vr_path = self.record_dir / "vr_raw.jsonl"
@@ -256,17 +273,15 @@ class TeleopRecorder:
                 except Exception as e:
                     logger.debug("Could not write lerobot_frames.parquet: %s", e)
 
-        with open(self.record_dir / "meta.json", "w") as f:
-            json.dump(meta, f, indent=2)
-        logger.info("Recording saved to %s", self.record_dir)
+        self._write_meta(started=False)
+        logger.info("Recording saved to %s (session_id=%s)", self.record_dir, self.session_id)
 
     def _save_motion_exchange_json(self):
         """Saves the recording in the JSON format expected by Motion Exchange."""
         if not self._lerobot_frames:
             return
 
-        ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        episode_name = f"teleop_{ts_str}"
+        episode_name = self.session_id or f"teleop_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
         from .config import JOINT_NAMES, GRIPPER_CLOSED_ANGLE
         

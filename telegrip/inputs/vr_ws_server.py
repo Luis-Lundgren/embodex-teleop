@@ -437,27 +437,52 @@ class VRWebSocketServer(BaseInputProvider):
             logger.warning(f"Error extracting pitch from quaternion: {e}")
             return 0.0
 
-    async def broadcast_robot_state(self, left_angles: np.ndarray, right_angles: Optional[np.ndarray] = None, is_recording: bool = False):
+    async def broadcast_robot_state(
+        self,
+        left_angles: np.ndarray,
+        right_angles: Optional[np.ndarray] = None,
+        is_recording: bool = False,
+        session_id: Optional[str] = None,
+        record_dir: Optional[str] = None,
+    ):
         """Broadcast robot state to all connected clients."""
         if not self.clients:
             return
 
-        # Prepare message
-        # Convert numpy array to list for JSON serialization
         message = {
             "type": "robot_state",
-            "timestamp": int(asyncio.get_event_loop().time() * 1000), 
+            "timestamp": int(asyncio.get_event_loop().time() * 1000),
             "left_arm": left_angles.tolist() if left_angles is not None else [],
-            "recording": is_recording
+            "recording": is_recording,
         }
-        
+        if session_id:
+            message["session_id"] = session_id
+        if record_dir:
+            message["record_dir"] = record_dir
+
         if right_angles is not None:
              message["right_arm"] = right_angles.tolist()
-        
+
         encoded_message = json.dumps(message)
-        
-        # Broadcast to all clients
+
         await asyncio.gather(
             *[client.send_text(encoded_message) for client in self.clients],
+            return_exceptions=True
+        )
+
+    async def broadcast_recording_stopped(self, session_id: str, record_dir: str):
+        """Notify clients that a recording has finished and been flushed."""
+        if not self.clients:
+            return
+
+        message = json.dumps({
+            "type": "recording_stopped",
+            "session_id": session_id,
+            "record_dir": record_dir,
+            "timestamp": int(asyncio.get_event_loop().time() * 1000),
+        })
+
+        await asyncio.gather(
+            *[client.send_text(message) for client in self.clients],
             return_exceptions=True
         )

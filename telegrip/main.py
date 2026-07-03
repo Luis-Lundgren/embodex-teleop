@@ -89,6 +89,48 @@ from .utils import get_next_session_dir
 logger = logging.getLogger(__name__)
 
 
+def _list_recorded_sessions(record_root: Path, active_session_id: Optional[str] = None) -> list:
+    """Scan record directories for completed teleop sessions."""
+    sessions = []
+    seen = set()
+    if record_root.exists():
+        for json_file in sorted(record_root.glob("*/teleop_*.json"), reverse=True):
+            session_id = json_file.stem
+            if session_id in seen:
+                continue
+            seen.add(session_id)
+            meta_path = json_file.parent / "meta.json"
+            created_at = None
+            if meta_path.exists():
+                try:
+                    with open(meta_path) as f:
+                        meta = json.load(f)
+                    created_at = meta.get("start_time")
+                except Exception:
+                    pass
+            sessions.append({
+                "id": session_id,
+                "record_dir": str(json_file.parent),
+                "createdAt": created_at,
+            })
+    if active_session_id and active_session_id not in seen:
+        sessions.insert(0, {"id": active_session_id, "recording": True})
+    return sessions
+
+
+def _load_session_data(record_root: Path, session_id: str) -> Optional[dict]:
+    """Load Motion Exchange JSON for a session by ID."""
+    if not record_root.exists():
+        return None
+    for json_file in record_root.glob(f"*/{session_id}.json"):
+        try:
+            with open(json_file) as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Failed to read session {session_id}: {e}")
+    return None
+
+
 def create_app(system: 'TelegripSystem'):
     """Create a FastAPI application for the teleoperation system."""
     app = FastAPI(title="TeleGrip API")
@@ -132,6 +174,30 @@ def create_app(system: 'TelegripSystem'):
             return status
         except Exception as e:
             logger.error(f"Error handling status request: {e}")
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    @app.get("/api/sessions")
+    async def list_sessions():
+        try:
+            record_root = system.control_loop.record_root if system.control_loop else Path("records")
+            active_id = None
+            if system.control_loop and system.control_loop.recorder and system.control_loop.recorder.is_running():
+                active_id = system.control_loop.recorder.session_id
+            return _list_recorded_sessions(record_root, active_id)
+        except Exception as e:
+            logger.error(f"Error listing sessions: {e}")
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    @app.get("/api/sessions/{session_id}")
+    async def get_session(session_id: str):
+        try:
+            record_root = system.control_loop.record_root if system.control_loop else Path("records")
+            data = _load_session_data(record_root, session_id)
+            if data is None:
+                return JSONResponse(status_code=404, content={"error": f"Session {session_id} not found"})
+            return data
+        except Exception as e:
+            logger.error(f"Error fetching session {session_id}: {e}")
             return JSONResponse(status_code=500, content={"error": str(e)})
 
     @app.get("/api/config")

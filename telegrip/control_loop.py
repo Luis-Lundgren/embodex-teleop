@@ -550,14 +550,25 @@ class ControlLoop:
         
         # Include recording status in digital twin update
         is_recording = self.recorder.is_running() if self.recorder else False
-        await self.vr_server.broadcast_robot_state(left_angles, right_angles, is_recording=is_recording)
+        session_id = self.recorder.session_id if self.recorder else None
+        record_dir = str(self.recorder.record_dir) if self.recorder and self.recorder.record_dir else None
+        await self.vr_server.broadcast_robot_state(
+            left_angles, right_angles,
+            is_recording=is_recording,
+            session_id=session_id,
+            record_dir=record_dir,
+        )
 
     async def _toggle_recording(self):
         """Toggle recording state and create recorder if needed."""
         if self.recorder and self.recorder.is_running():
             logger.info("🎬 Stopping recording (VR button)...")
-            self.recorder.stop()
-            print(f"📼 Recording STOPPED: {self.recorder.record_dir}")
+            session_id = self.recorder.stop()
+            print(f"📼 Recording STOPPED: {self.recorder.record_dir} (session_id={session_id})")
+            if self.vr_server and session_id:
+                await self.vr_server.broadcast_recording_stopped(
+                    session_id, str(self.recorder.record_dir)
+                )
             if self.record_single_session:
                 self._recording_finalized = True
         else:
@@ -595,14 +606,18 @@ class ControlLoop:
             
             # Log to console for visual feedback on host
             print(f"Record single session set to {self.record_single_session}")
-            print(f"📼 Recording STARTED: {new_dir}")
+            print(f"📼 Recording STARTED: {new_dir} (session_id={self.recorder.session_id})")
 
     async def _reset_recording(self):
         """Reset recording state to allow a new session if record_single_session is enabled."""
         if self.recorder and self.recorder.is_running():
             logger.info("🎬 Forcing stop of recording (reset/disconnect)...")
-            self.recorder.stop()
-            print(f"📼 Recording STOPPED (disconnect): {self.recorder.record_dir}")
+            session_id = self.recorder.stop()
+            print(f"📼 Recording STOPPED (disconnect): {self.recorder.record_dir} (session_id={session_id})")
+            if self.vr_server and session_id:
+                await self.vr_server.broadcast_recording_stopped(
+                    session_id, str(self.recorder.record_dir)
+                )
         
         if self.record_single_session:
             logger.info("🎬 Resetting single session recording state for next connection.")
@@ -638,6 +653,7 @@ class ControlLoop:
     @property
     def status(self) -> Dict:
         """Get current control loop status."""
+        is_recording = self.recorder.is_running() if self.recorder else False
         return {
             "running": self.is_running,
             "left_arm_mode": self.left_arm.mode.value,
@@ -646,4 +662,7 @@ class ControlLoop:
             "left_arm_connected": self.robot_interface.get_arm_connection_status("left") if self.robot_interface else False,
             "right_arm_connected": self.robot_interface.get_arm_connection_status("right") if self.robot_interface else False,
             "visualizer_connected": self.visualizer.is_connected if self.visualizer else False,
-        } 
+            "recording": is_recording,
+            "session_id": self.recorder.session_id if self.recorder and is_recording else None,
+            "record_dir": str(self.recorder.record_dir) if self.recorder and is_recording else None,
+        }
