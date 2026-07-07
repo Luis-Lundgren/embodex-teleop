@@ -276,6 +276,26 @@ def create_app(system: 'TelegripSystem'):
             logger.error(f"Error handling keypress request: {e}")
             return JSONResponse(status_code=500, content={"error": str(e)})
 
+    @app.post("/api/task")
+    async def post_task(request: Request):
+        try:
+            data = await request.json()
+            action = data.get('action')
+            if action == 'reset':
+                logger.info("🔌 Adding command to queue: task_reset")
+                system.add_control_command("task_reset")
+                return {"success": True, "action": action}
+            elif action == 'status':
+                task = system.control_loop.task if system.control_loop else None
+                if task is None:
+                    return JSONResponse(status_code=404, content={"error": "No task enabled"})
+                return {"success": True, "task": task.get_state(), "objects": task.get_object_states()}
+            else:
+                return JSONResponse(status_code=400, content={"error": f"Invalid action: {action}"})
+        except Exception as e:
+            logger.error(f"Error handling task request: {e}")
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
     @app.post("/api/restart")
     async def post_restart():
         try:

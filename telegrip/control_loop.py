@@ -57,6 +57,7 @@ class ControlLoop:
         self.visualizer = None
         self.web_keyboard_handler = None  # Reference to web-based keyboard handler
         self.vr_server = None # Reference to VR server for digital twin updates
+        self.task = None  # Optional challenge task (fiber plug)
         
         # Arm states
         self.left_arm = ArmState("left")
@@ -136,7 +137,27 @@ class ControlLoop:
                 logger.error(error_msg)
                 setup_errors.append(error_msg)
                 self.visualizer = None
-        
+
+        # Setup challenge task (fiber plug) in the same PyBullet world
+        task_cfg = getattr(self.config, "task", None) or {}
+        if self.visualizer and task_cfg.get("enabled", False):
+            try:
+                from .core.task_fiber_plug import FiberPlugTask
+                self.task = FiberPlugTask(
+                    physics_client=self.visualizer.physics_client,
+                    robot_id=self.visualizer.robot_ids['left'],
+                    ee_link_index=self.visualizer.end_effector_link_indices['left'],
+                    base_position=[0.2, 0, 0],  # left robot base in PyBullet world
+                    task_config=task_cfg,
+                )
+                if not self.task.setup():
+                    self.task = None
+                else:
+                    logger.info(f"🔌 Challenge task enabled: {self.task.name}")
+            except Exception as e:
+                logger.error(f"Challenge task setup failed: {e}")
+                self.task = None
+
         # Report all setup issues
         if setup_errors:
             logger.error("Setup failed with the following errors:")
@@ -175,6 +196,14 @@ class ControlLoop:
                 if self.visualizer:
                     self._update_visualization()
 
+                # Update challenge task (grasp/insertion) after joints are synced
+                if self.task and self.robot_interface:
+                    try:
+                        gripper_deg = float(self.robot_interface.get_arm_angles("left")[GRIPPER_INDEX])
+                        self.task.update(gripper_deg)
+                    except Exception as e:
+                        logger.debug(f"Task update error: {e}")
+
                 # Update AR digital twin
                 if self.config.digital_twin_enabled and self.vr_server:
                     await self._update_digital_twin()
@@ -190,11 +219,27 @@ class ControlLoop:
                     # Also get ACTUAL (measured) joints for observation.state
                     left_actual = self.robot_interface.get_actual_arm_angles("left") if self.config.left_arm_enabled else None
                     right_actual = self.robot_interface.get_actual_arm_angles("right") if self.config.right_arm_enabled else None
-                    
+
+                    # Challenge task: connector pose (env state) + task status
+                    env_state = None
+                    task_state = None
+                    if self.task:
+                        objs = self.task.get_object_states()
+                        conn = next((o for o in objs if o["id"] == "fiber_connector"), None)
+                        if conn:
+                            env_state = list(conn["position"]) + list(conn["quaternion"])
+                        task_state = self.task.get_state()
+                        task_state["initial_connector_pose"] = self.task.initial_connector_pose
+                        port = next((o for o in objs if o["id"] == "port_panel"), None)
+                        if port:
+                            task_state["port_pose"] = list(port["position"]) + list(port["quaternion"])
+
                     self.recorder.on_robot_goal(
                         left_pose, right_pose, left_joints, right_joints, left_gripper, right_gripper,
                         left_actual=left_actual, right_actual=right_actual,
                         timestamp=time.time(),
+                        env_state=env_state,
+                        task_state=task_state,
                     )
                 
                 # Periodic logging
@@ -325,6 +370,12 @@ class ControlLoop:
                     logger.error("❌ Failed to disengage robot motors")
             else:
                 logger.warning("Cannot disengage robot: no robot interface")
+        elif action == 'task_reset':
+            if self.task:
+                self.task.reset()
+                logger.info("🔌 Challenge task RESET via API")
+            else:
+                logger.warning("Cannot reset task: no task enabled")
         else:
             logger.warning(f"Unknown command: {action}")
 
@@ -353,6 +404,12 @@ class ControlLoop:
         # Handle recording toggle from VR
         if (goal.metadata and goal.metadata.get("record_toggle")):
             await self._toggle_recording()
+            return
+
+        # Handle challenge task reset from VR / API
+        if (goal.metadata and goal.metadata.get("task_reset")):
+            if self.task:
+                self.task.reset()
             return
         
         # Handle recording reset from VR disconnect
@@ -552,11 +609,18 @@ class ControlLoop:
         is_recording = self.recorder.is_running() if self.recorder else False
         session_id = self.recorder.session_id if self.recorder else None
         record_dir = str(self.recorder.record_dir) if self.recorder and self.recorder.record_dir else None
+
+        # Challenge task objects + status
+        objects = self.task.get_object_states() if self.task else None
+        task_state = self.task.get_state() if self.task else None
+
         await self.vr_server.broadcast_robot_state(
             left_angles, right_angles,
             is_recording=is_recording,
             session_id=session_id,
             record_dir=record_dir,
+            objects=objects,
+            task=task_state,
         )
 
     async def _toggle_recording(self):
@@ -665,4 +729,5 @@ class ControlLoop:
             "recording": is_recording,
             "session_id": self.recorder.session_id if self.recorder and is_recording else None,
             "record_dir": str(self.recorder.record_dir) if self.recorder and is_recording else None,
+            "task": self.task.get_state() if self.task else None,
         }

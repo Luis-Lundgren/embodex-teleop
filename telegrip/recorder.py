@@ -80,6 +80,9 @@ class TeleopRecorder:
         self._lerobot_frames: List[Dict[str, Any]] = []
         self._running = False
         self.session_id: Optional[str] = None
+        # Challenge task tracking (fiber plug): latest status + whether any
+        # recorded frame carried an environment state
+        self._latest_task_state: Optional[Dict[str, Any]] = None
 
     def start(self, new_dir: Optional[Path] = None):
         """Start a new recording session."""
@@ -91,6 +94,7 @@ class TeleopRecorder:
             self._vr_raw = []
             self._robot_goal_rows = []
             self._lerobot_frames = []
+            self._latest_task_state = None
             self._running = True
         self.record_dir.mkdir(parents=True, exist_ok=True)
         self._write_meta(started=True)
@@ -138,11 +142,15 @@ class TeleopRecorder:
         left_actual: Optional[np.ndarray] = None,
         right_actual: Optional[np.ndarray] = None,
         timestamp: Optional[float] = None,
+        env_state: Optional[List[float]] = None,
+        task_state: Optional[Dict[str, Any]] = None,
     ):
         """
         Record one control-loop snapshot (same semantics as ROS2 topics).
         left_pose / right_pose: (x, y, z, qx, qy, qz, qw) or None if arm idle.
         left_joints / right_joints: Joint angle vector or None.
+        env_state: challenge object pose [x, y, z, qx, qy, qz, qw] (robot base frame).
+        task_state: challenge task status dict (name, success, attempts, ...).
         No-op when vr_only is True.
         """
         if self.vr_only:
@@ -184,6 +192,8 @@ class TeleopRecorder:
         with self._lock:
             if not self._running:
                 return
+            if task_state is not None:
+                self._latest_task_state = dict(task_state)
             self._robot_goal_rows.append(row)
 
             # LeRobot-style: flat observation.state (current) and action (target/next)
@@ -203,13 +213,16 @@ class TeleopRecorder:
             has_motion = any(v != 0.0 for v in action) or left_gripper_closed or right_gripper_closed
 
             if has_motion:
-                self._lerobot_frames.append({
+                frame = {
                     "timestamp": timestamp,
                     "episode_index": self.episode_id,
                     "frame_index": len(self._lerobot_frames),
                     "observation.state": obs_state,
                     "action": action,
-                })
+                }
+                if env_state is not None:
+                    frame["observation.environment_state"] = [float(v) for v in env_state]
+                self._lerobot_frames.append(frame)
 
     def _write_meta(self, started: bool = False):
         """Write session metadata. Called at start and again on flush."""
@@ -230,6 +243,8 @@ class TeleopRecorder:
                 "num_vr_raw": len(self._vr_raw),
                 "num_robot_goal_frames": len(self._robot_goal_rows),
             })
+        if self._latest_task_state is not None:
+            meta["task"] = self._latest_task_state
         with open(self.record_dir / "meta.json", "w") as f:
             json.dump(meta, f, indent=2)
 
@@ -288,6 +303,8 @@ class TeleopRecorder:
         timestamps = []
         joint_positions = []
         gripper_states = []
+        object_poses = []
+        has_env_states = False
         
         t0 = self._start_time or self._lerobot_frames[0]["timestamp"]
 
@@ -309,19 +326,31 @@ class TeleopRecorder:
             else:
                 gripper_states.append(0.0)
 
+            # Challenge object pose track (aligned per frame)
+            env = frame.get("observation.environment_state")
+            if env is not None:
+                has_env_states = True
+            object_poses.append(env)
+
+        episode = {
+            "id": episode_name,
+            "timestamps": timestamps,
+            "joint_names": JOINT_NAMES,
+            "joint_positions": joint_positions,
+            "gripper": gripper_states,
+            "source": "teleop"
+        }
+        if self._latest_task_state is not None:
+            episode["success"] = bool(self._latest_task_state.get("success", False))
+        if has_env_states:
+            episode["object_poses"] = object_poses
+
         data = {
             "robot": "so100",
-            "episodes": [
-                {
-                    "id": episode_name,
-                    "timestamps": timestamps,
-                    "joint_names": JOINT_NAMES,
-                    "joint_positions": joint_positions,
-                    "gripper": gripper_states,
-                    "source": "teleop"
-                }
-            ]
+            "episodes": [episode]
         }
+        if self._latest_task_state is not None:
+            data["task"] = self._latest_task_state
         
         json_path = self.record_dir / f"{episode_name}.json"
         with open(json_path, "w") as f:

@@ -71,6 +71,20 @@ DEFAULT_CONFIG = {
         "base_frame": "teleop_base",
         "node_name": "telegrip_bridge",
         "topic_prefix": "telegrip"
+    },
+    "task": {
+        "enabled": True,
+        "name": "fiber_plug_6mm",
+        # Poses/offsets in the LEFT robot base frame (PyBullet Z-up, meters)
+        "port_position": [0.0, -0.24, 0.0],
+        "port_yaw_deg": 180.0,
+        "spawn_center": [-0.10, -0.16],
+        "spawn_range": [0.03, 0.03],
+        "position_tolerance": 0.008,
+        "angle_tolerance_deg": 20.0,
+        "seat_depth": 0.012,
+        "grasp_radius": 0.06,
+        "gripper_closed_threshold": 22.5
     }
 }
 
@@ -261,7 +275,10 @@ class TelegripConfig:
     pos_step: float = POS_STEP
     angle_step: float = ANGLE_STEP
     gripper_step: float = GRIPPER_STEP
-    
+
+    # Challenge task (fiber plug) settings, populated from config file
+    task: Dict = None
+
     def __post_init__(self):
         # Initialize follower_ports if not set
         if self.follower_ports is None:
@@ -286,6 +303,12 @@ class TelegripConfig:
         self.ros2_base_frame = ros2.get("base_frame", ROS2_BASE_FRAME)
         self.ros2_node_name = ros2.get("node_name", ROS2_NODE_NAME)
         self.ros2_topic_prefix = ros2.get("topic_prefix", ROS2_TOPIC_PREFIX)
+
+        # Challenge task settings (merged file config over defaults)
+        if self.task is None:
+            task_cfg = dict(DEFAULT_CONFIG["task"])
+            task_cfg.update(_config_data.get("task", {}) or {})
+            self.task = task_cfg
     
     @property
     def ssl_files_exist(self) -> bool:

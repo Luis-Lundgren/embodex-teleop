@@ -127,6 +127,12 @@ class VRWebSocketServer(BaseInputProvider):
                             arm="left",
                             metadata={"record_toggle": True},
                         ))
+                    elif data.get('action') == 'task_reset':
+                        logger.info("🔌 VR task_reset requested")
+                        await self.command_queue.put(ControlGoal(
+                            arm="left",
+                            metadata={"task_reset": True},
+                        ))
                     else:
                         await self.process_controller_data(data)
                 except json.JSONDecodeError:
@@ -444,6 +450,8 @@ class VRWebSocketServer(BaseInputProvider):
         is_recording: bool = False,
         session_id: Optional[str] = None,
         record_dir: Optional[str] = None,
+        objects: Optional[list] = None,
+        task: Optional[dict] = None,
     ):
         """Broadcast robot state to all connected clients."""
         if not self.clients:
@@ -459,6 +467,10 @@ class VRWebSocketServer(BaseInputProvider):
             message["session_id"] = session_id
         if record_dir:
             message["record_dir"] = record_dir
+        if objects is not None:
+            message["objects"] = objects
+        if task is not None:
+            message["task"] = task
 
         if right_angles is not None:
              message["right_arm"] = right_angles.tolist()
