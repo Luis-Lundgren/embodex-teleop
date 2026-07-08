@@ -80,11 +80,20 @@ DEFAULT_CONFIG = {
         "port_yaw_deg": 180.0,
         "spawn_center": [-0.10, -0.16],
         "spawn_range": [0.03, 0.03],
-        "position_tolerance": 0.008,
-        "angle_tolerance_deg": 20.0,
+        "position_tolerance": 0.015,
+        "angle_tolerance_deg": 35.0,
         "seat_depth": 0.012,
+        "min_insert_depth": -0.01,
+        "snap_distance": 0.03,
+        "snap_radius": 0.02,
+        "snap_angle_deg": 40.0,
         "grasp_radius": 0.06,
-        "gripper_closed_threshold": 22.5
+        "gripper_closed_threshold": 22.5,
+        "grasp_local_pos": [0.0, 0.01, 0.0],
+        "grasp_local_rpy_deg": [0.0, 0.0, 0.0],
+        "latch_gripper_while_grasped": True,
+        "guide_radius": 0.02,
+        "guide_angle_deg": 40.0,
     }
 }
 

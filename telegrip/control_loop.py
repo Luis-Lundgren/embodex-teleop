@@ -199,6 +199,11 @@ class ControlLoop:
                 # Update challenge task (grasp/insertion) after joints are synced
                 if self.task and self.robot_interface:
                     try:
+                        # Keep jaw closed for the whole grasp so XR trigger release
+                        # cannot drop the connector.
+                        if (self.task.is_grasped
+                                and self.task.cfg.get("latch_gripper_while_grasped", True)):
+                            self.robot_interface.set_gripper("left", True)
                         gripper_deg = float(self.robot_interface.get_arm_angles("left")[GRIPPER_INDEX])
                         self.task.update(gripper_deg)
                     except Exception as e:
@@ -492,6 +497,14 @@ class ControlLoop:
         
         # Handle gripper control (independent of mode)
         if goal.gripper_closed is not None and self.robot_interface:
+            # While the fiber connector is grasped, keep the jaw closed even if
+            # the XR trigger is released (or keyboard tries to open).
+            if (goal.arm == "left"
+                    and self.task
+                    and getattr(self.task, "is_grasped", False)
+                    and self.task.cfg.get("latch_gripper_while_grasped", True)):
+                self.robot_interface.set_gripper("left", True)
+                return
             self.robot_interface.set_gripper(goal.arm, goal.gripper_closed)
     
     def _update_robot_safely(self):
