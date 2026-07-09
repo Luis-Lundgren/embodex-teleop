@@ -16,7 +16,7 @@ from scipy.spatial.transform import Rotation as R
 
 from ..config import (
     JOINT_NAMES, NUM_JOINTS, URDF_TO_INTERNAL_NAME_MAP, 
-    END_EFFECTOR_LINK_NAME
+    END_EFFECTOR_LINK_NAME, GRIPPER_INDEX, hardware_to_urdf_gripper_deg,
 )
 
 logger = logging.getLogger(__name__)
@@ -353,6 +353,10 @@ class PyBulletVisualizer:
         if not self.is_connected or arm not in self.robot_ids:
             return
         
+        joint_angles_deg = np.asarray(joint_angles_deg, dtype=float).copy()
+        joint_angles_deg[GRIPPER_INDEX] = hardware_to_urdf_gripper_deg(
+            joint_angles_deg[GRIPPER_INDEX]
+        )
         joint_angles_rad = np.deg2rad(joint_angles_deg)
         for i in range(NUM_JOINTS):
             if self.joint_indices[arm][i] is not None:

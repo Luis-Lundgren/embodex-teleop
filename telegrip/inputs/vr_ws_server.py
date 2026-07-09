@@ -241,21 +241,26 @@ class VRWebSocketServer(BaseInputProvider):
         
         controller = self.left_controller if hand == 'left' else self.right_controller
         
-        # Handle trigger for gripper control
+        # Handle trigger for gripper control — close jaw for the whole hold, not only
+        # on the initial press edge, so grasp + latch stay in sync with the trigger.
         trigger_active = trigger > 0.5
-        if trigger_active != controller.trigger_active:
-            controller.trigger_active = trigger_active
-
-            # Trigger pressed -> close gripper; released -> open
-            # (While a challenge object is grasped, the control loop latches closed.)
-            gripper_goal = ControlGoal(
+        if trigger_active:
+            if not controller.trigger_active:
+                logger.info(f"🤏 {hand.upper()} gripper CLOSED (trigger pressed)")
+            controller.trigger_active = True
+            await self.send_goal(ControlGoal(
                 arm=hand,
-                gripper_closed=trigger_active,
-                metadata={"source": "vr_trigger"}
-            )
-            await self.send_goal(gripper_goal)
-
-            logger.info(f"🤏 {hand.upper()} gripper {'CLOSED' if trigger_active else 'OPENED'}")
+                gripper_closed=True,
+                metadata={"source": "vr_trigger"},
+            ))
+        elif controller.trigger_active:
+            controller.trigger_active = False
+            await self.send_goal(ControlGoal(
+                arm=hand,
+                gripper_closed=False,
+                metadata={"source": "vr_trigger_release"},
+            ))
+            logger.info(f"🤏 {hand.upper()} gripper OPENED (trigger released)")
         
         # Handle grip button for arm movement control
         if grip_active:

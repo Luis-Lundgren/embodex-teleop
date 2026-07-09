@@ -300,9 +300,10 @@ class FiberPlugTask:
         gripper_closed = gripper_angle_deg > float(self.cfg["gripper_closed_threshold"])
 
         if not self.success:
-            # Grasp on close edge
-            if gripper_closed and not self._prev_gripper_closed and self.grasp_constraint is None:
-                self._try_grasp()
+            if self.grasp_constraint is None:
+                # Snap only while the XR trigger is held (gripper closed) and in range.
+                if gripper_closed:
+                    self._try_grasp()
             # Release on open edge — skipped while latching so XR trigger release
             # keeps the connector attached until success or task reset.
             elif (not gripper_closed and self._prev_gripper_closed
@@ -359,6 +360,9 @@ class FiberPlugTask:
         )
         p.changeConstraint(self.grasp_constraint, maxForce=100)
         self.is_grasped = True
+        if self.cfg.get("latch_gripper_while_grasped", True):
+            # Keep task state aligned with the forced closed jaw in the control loop.
+            self._prev_gripper_closed = True
         # Geometric guidance owns panel interaction while grasped.
         self._set_fixture_collision(False)
         logger.info(f"🔗 Connector GRASPED (canonical jaw snap, was {dist * 100:.1f}cm away)")

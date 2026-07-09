@@ -11,7 +11,15 @@ import queue  # Add import for thread-safe queue
 from pathlib import Path
 from typing import Dict, Optional
 
-from .config import TelegripConfig, NUM_JOINTS, WRIST_FLEX_INDEX, WRIST_ROLL_INDEX, GRIPPER_INDEX
+from .config import (
+    TelegripConfig,
+    NUM_JOINTS,
+    WRIST_FLEX_INDEX,
+    WRIST_ROLL_INDEX,
+    GRIPPER_INDEX,
+    GRIPPER_CLOSED_ANGLE,
+    hardware_to_urdf_gripper_deg,
+)
 from .core.robot_interface import RobotInterface
 # PyBulletVisualizer will be imported on demand
 from .inputs.base import ControlGoal, ControlMode
@@ -188,26 +196,21 @@ class ControlLoop:
             try:
                 # Process command queue
                 await self._process_commands()
+
+                # Keep jaw closed for an active grasp before IK / visualization so
+                # the canonical connector snap matches the closed jaw pose.
+                self._latch_task_gripper()
                 
                 # Update robot (with error resilience)
                 self._update_robot_safely()
+
+                # Grasp/release + insertion after joints are synced, then latch again
+                # so a new grasp closes the jaw on the same frame.
+                self._update_task()
                 
-                # Update visualization
+                # Update visualization (must run after task gripper latch)
                 if self.visualizer:
                     self._update_visualization()
-
-                # Update challenge task (grasp/insertion) after joints are synced
-                if self.task and self.robot_interface:
-                    try:
-                        # Keep jaw closed for the whole grasp so XR trigger release
-                        # cannot drop the connector.
-                        if (self.task.is_grasped
-                                and self.task.cfg.get("latch_gripper_while_grasped", True)):
-                            self.robot_interface.set_gripper("left", True)
-                        gripper_deg = float(self.robot_interface.get_arm_angles("left")[GRIPPER_INDEX])
-                        self.task.update(gripper_deg)
-                    except Exception as e:
-                        logger.debug(f"Task update error: {e}")
 
                 # Update AR digital twin
                 if self.config.digital_twin_enabled and self.vr_server:
@@ -504,9 +507,45 @@ class ControlLoop:
                     and getattr(self.task, "is_grasped", False)
                     and self.task.cfg.get("latch_gripper_while_grasped", True)):
                 self.robot_interface.set_gripper("left", True)
-                return
-            self.robot_interface.set_gripper(goal.arm, goal.gripper_closed)
+            else:
+                self.robot_interface.set_gripper(goal.arm, goal.gripper_closed)
     
+    def _latch_task_gripper(self):
+        """Force the left gripper closed while the fiber connector is grasped."""
+        if not self.task or not self.robot_interface:
+            return
+        if (self.task.is_grasped
+                and self.task.cfg.get("latch_gripper_while_grasped", True)):
+            self.robot_interface.set_gripper("left", True)
+
+    def _update_task(self):
+        """Run challenge task logic and close the jaw when a grasp latches."""
+        if not self.task or not self.robot_interface:
+            return
+        try:
+            gripper_deg = float(self.robot_interface.get_arm_angles("left")[GRIPPER_INDEX])
+            self.task.update(gripper_deg)
+            self._latch_task_gripper()
+        except Exception as e:
+            logger.debug(f"Task update error: {e}")
+
+    def _get_display_arm_angles(self, arm: str) -> np.ndarray:
+        """Commanded joint angles for display, with fiber-task gripper latch applied."""
+        angles = self.robot_interface.get_arm_angles(arm)
+        if arm == "left":
+            angles = angles.copy()
+            angles[GRIPPER_INDEX] = self._task_gripper_angle(arm, angles[GRIPPER_INDEX])
+        return angles
+
+    def _task_gripper_angle(self, arm: str, current_gripper: float) -> float:
+        """Return gripper angle for IK, honoring fiber-task grasp latch."""
+        if (arm == "left"
+                and self.task
+                and self.task.is_grasped
+                and self.task.cfg.get("latch_gripper_while_grasped", True)):
+            return GRIPPER_CLOSED_ANGLE
+        return current_gripper
+
     def _update_robot_safely(self):
         """Update robot with current control goals (with error handling)."""
         if not self.robot_interface:
@@ -533,6 +572,7 @@ class ControlLoop:
             
             # Update robot angles
             current_gripper = self.robot_interface.get_arm_angles("left")[GRIPPER_INDEX]
+            current_gripper = self._task_gripper_angle("left", current_gripper)
             self.robot_interface.update_arm_angles("left", ik_solution, 
                                                  self.left_arm.current_wrist_flex, 
                                                  self.left_arm.current_wrist_roll, 
@@ -562,9 +602,10 @@ class ControlLoop:
         if not self.visualizer:
             return
         
-        # Update robot poses for both arms using ACTUAL angles from robot hardware
-        left_angles = self.robot_interface.get_actual_arm_angles("left")
-        right_angles = self.robot_interface.get_actual_arm_angles("right")
+        # Update robot poses for both arms using commanded angles (hardware frame).
+        # PyBullet maps gripper angles to the URDF inside update_robot_pose.
+        left_angles = self._get_display_arm_angles("left")
+        right_angles = self._get_display_arm_angles("right")
         
         self.visualizer.update_robot_pose(left_angles, 'left')
         self.visualizer.update_robot_pose(right_angles, 'right')
@@ -614,9 +655,15 @@ class ControlLoop:
         if not self.vr_server or not self.robot_interface:
             return
             
-        # Get current angles only for enabled arms
-        left_angles = self.robot_interface.get_actual_arm_angles("left") if self.config.left_arm_enabled else np.zeros(NUM_JOINTS)
-        right_angles = self.robot_interface.get_actual_arm_angles("right") if self.config.right_arm_enabled else np.zeros(NUM_JOINTS)
+        # Get current angles only for enabled arms. The web/VR twins apply the
+        # jaw angle directly to URDF-frame GLB models (0 deg = closed), so
+        # convert the gripper joint from the hardware frame (closed_angle=closed).
+        left_angles = self._get_display_arm_angles("left") if self.config.left_arm_enabled else np.zeros(NUM_JOINTS)
+        right_angles = self._get_display_arm_angles("right") if self.config.right_arm_enabled else np.zeros(NUM_JOINTS)
+        left_angles = left_angles.copy()
+        right_angles = right_angles.copy()
+        left_angles[GRIPPER_INDEX] = hardware_to_urdf_gripper_deg(left_angles[GRIPPER_INDEX])
+        right_angles[GRIPPER_INDEX] = hardware_to_urdf_gripper_deg(right_angles[GRIPPER_INDEX])
         
         # Include recording status in digital twin update
         is_recording = self.recorder.is_running() if self.recorder else False

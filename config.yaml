@@ -49,13 +49,13 @@ task:
   angle_tolerance_deg: 35.0
   seat_depth: 0.012
   min_insert_depth: -0.01
-  snap_distance: 0.03
+  snap_distance: 0.04
   snap_radius: 0.02
-  snap_angle_deg: 40.0
+  snap_angle_deg: 60.0
   grasp_radius: 0.06
   gripper_closed_threshold: 22.5
   grasp_local_pos: [0.0, 0.01, 0.0]
   grasp_local_rpy_deg: [0.0, 0.0, 0.0]
   latch_gripper_while_grasped: true
   guide_radius: 0.02
-  guide_angle_deg: 40.0
+  guide_angle_deg: 60.0
