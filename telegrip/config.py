@@ -76,9 +76,10 @@ DEFAULT_CONFIG = {
         "enabled": True,
         "name": "fiber_plug_6mm",
         # Poses/offsets in the LEFT robot base frame (PyBullet Z-up, meters)
-        "port_position": [0.0, -0.24, 0.0],
+        # Port fixture: raised (+Z) and farther (-Y) for a more extended arm reach.
+        "port_position": [0.0, -0.30, 0.05],
         "port_yaw_deg": 180.0,
-        "spawn_center": [-0.10, -0.16],
+        "spawn_center": [-0.08, -0.14],
         "spawn_range": [0.03, 0.03],
         "position_tolerance": 0.015,
         "angle_tolerance_deg": 35.0,

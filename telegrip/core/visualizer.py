@@ -170,8 +170,10 @@ class PyBulletVisualizer:
         if should_suppress_output:
             with suppress_stdout_stderr():
                 p.loadURDF("plane.urdf")
+                self._create_workspace_table()
         else:
             p.loadURDF("plane.urdf")
+            self._create_workspace_table()
         
         # Load robot URDF
         if not os.path.exists(self.urdf_path):
@@ -221,6 +223,25 @@ class PyBulletVisualizer:
             logger.info("PyBullet visualization setup complete")
         return True
     
+    def _create_workspace_table(self):
+        """Grey workspace table matching the VR digital twin (1.2 m x 1.0 m)."""
+        width, depth, thick = 1.2, 1.0, 0.025
+        half = [width / 2, depth / 2, thick / 2]
+        col = p.createCollisionShape(p.GEOM_BOX, halfExtents=half)
+        vis = p.createVisualShape(
+            p.GEOM_BOX,
+            halfExtents=half,
+            rgbaColor=[0.55, 0.55, 0.55, 1.0],
+        )
+        # Robot base at [0.2, 0, 0]; table spans toward the panel at -Y.
+        center = [0.2, -0.15, -thick / 2]
+        p.createMultiBody(
+            baseMass=0,
+            baseCollisionShapeIndex=col,
+            baseVisualShapeIndex=vis,
+            basePosition=center,
+        )
+
     def _map_joints(self) -> bool:
         """Map joint names to PyBullet indices for both robots."""
         success = True

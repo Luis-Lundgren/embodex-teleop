@@ -43,12 +43,11 @@ DEFAULT_TASK_CONFIG = {
     "enabled": True,
     "name": "fiber_plug_6mm",
     # Port fixture pose in left-robot base frame (on the table, facing the robot).
-    # The arm's workspace is mostly at negative Y, so the port sits at -Y and is
-    # yawed 180 deg so its front face points back toward the robot.
-    "port_position": [0.0, -0.24, 0.0],
+    # Raised (+Z) and farther (-Y) so the arm reaches with a more extended pose.
+    "port_position": [0.0, -0.30, 0.05],
     "port_yaw_deg": 180.0,
     # Connector spawn: center [x, y] and random range [+-dx, +-dy]
-    "spawn_center": [-0.10, -0.16],
+    "spawn_center": [-0.08, -0.14],
     "spawn_range": [0.03, 0.03],
     # Success tolerances
     "position_tolerance": 0.015,      # meters, ferrule tip to socket axis (lateral)
