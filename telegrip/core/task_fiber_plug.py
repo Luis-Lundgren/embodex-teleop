@@ -69,6 +69,10 @@ DEFAULT_TASK_CONFIG = {
     # Once grasped, ignore gripper-open until success/reset (XR trigger release
     # must not drop the connector).
     "latch_gripper_while_grasped": True,
+    "panel_latch_hole_radius": 0.035,  # meters, tip/ferrule to socket axis
+    "panel_latch_max_distance": 0.04,  # meters, 3D proximity to hole at any angle
+    "panel_latch_depth_min": -0.035,   # meters, allow tip slightly in front of face
+    "panel_latch_depth_max": 0.045,    # meters, allow tip slightly into the hole
     # Guided insertion (while grasped)
     "guide_radius": 0.02,             # lateral acceptance for socket guidance
     "guide_angle_deg": 40.0,          # max axis misalignment to enter guide mode
@@ -311,7 +315,10 @@ class FiberPlugTask:
                 self._release()
 
             if self.is_grasped:
-                self._apply_panel_guidance()
+                # Generous proximity latch first (mirrors arm grasp feel).
+                self._try_panel_latch()
+                if not self.success:
+                    self._apply_panel_guidance()
 
             if not self.success:
                 self._check_insertion()
@@ -423,6 +430,73 @@ class FiberPlugTask:
         tip_world, conn_axis = self._tip_from_pose(conn_pos, conn_orn)
         return tip_world, conn_axis, np.array(conn_pos), np.array(conn_orn)
 
+    def _point_in_hole(self, point: np.ndarray, entry_world: np.ndarray,
+                       insert_axis: np.ndarray) -> bool:
+        """True if point is inside the socket capture cylinder near the face."""
+        delta = np.asarray(point, dtype=float) - entry_world
+        depth = float(np.dot(delta, insert_axis))
+        lateral = float(np.linalg.norm(delta - depth * insert_axis))
+        hole_r = float(self.cfg.get("panel_latch_hole_radius", 0.025))
+        depth_min = float(self.cfg.get("panel_latch_depth_min", -0.03))
+        depth_max = float(self.cfg.get("panel_latch_depth_max", 0.04))
+        return lateral <= hole_r and depth_min <= depth <= depth_max
+
+    def _ferrule_touches_hole(self, tip_world: np.ndarray, conn_axis: np.ndarray,
+                              entry_world: np.ndarray, insert_axis: np.ndarray) -> bool:
+        """True if the white ferrule (tip → back along axis) intersects the hole."""
+        axis = np.asarray(conn_axis, dtype=float)
+        nrm = float(np.linalg.norm(axis))
+        if nrm < 1e-9:
+            return False
+        axis = axis / nrm
+        # Sample the white ferrule centerline (tip back toward the blue body).
+        for t in np.linspace(0.0, float(FERRULE_LENGTH), 6):
+            pt = tip_world - axis * t
+            if self._point_in_hole(pt, entry_world, insert_axis):
+                return True
+        return False
+
+    def _try_panel_latch(self):
+        """Latch when the white ferrule or connector gets close to the socket hole.
+
+        No angle requirement: connector or ferrule in proximity to the socket hole is enough.
+        Checks both the actual connector pose and the EE-driven grasp pose so
+        constraint lag or arbitrary rotation angles cannot miss a visible contact.
+        """
+        entry_world, insert_axis = self._socket_entry_world()
+        max_dist = float(self.cfg.get("panel_latch_max_distance", 0.04))
+
+        # Check actual connector pose
+        tip_world, conn_axis, conn_pos, _ = self._tip_and_axis_world()
+        ferrule_base = tip_world - conn_axis * float(FERRULE_LENGTH)
+
+        # Check EE-driven unconstrained grasp pose
+        conn_pos_u, conn_orn_u = self._unconstrained_grasp_world()
+        tip_u, axis_u = self._tip_from_pose(conn_pos_u, conn_orn_u)
+        ferrule_base_u = tip_u - axis_u * float(FERRULE_LENGTH)
+
+        # Check EE tip position
+        ee_pos, _ = self._ee_tip_world()
+
+        pts_to_check = [tip_world, conn_pos, ferrule_base, tip_u, conn_pos_u, ferrule_base_u, ee_pos]
+
+        # 1. Orientation-agnostic 3D spatial proximity check
+        for pt in pts_to_check:
+            if np.linalg.norm(np.asarray(pt) - entry_world) <= max_dist:
+                logger.info("🔌 Panel latch: connector close to socket hole (orientation agnostic)")
+                self._latch_success(entry_world, insert_axis)
+                return
+
+        # 2. Ferrule line intersection check
+        if self._ferrule_touches_hole(tip_world, conn_axis, entry_world, insert_axis):
+            logger.info("🔌 Panel latch: white ferrule in socket hole")
+            self._latch_success(entry_world, insert_axis)
+            return
+
+        if self._ferrule_touches_hole(tip_u, axis_u, entry_world, insert_axis):
+            logger.info("🔌 Panel latch: white ferrule in socket hole (EE pose)")
+            self._latch_success(entry_world, insert_axis)
+
     def _apply_panel_guidance(self):
         """Block panel-face penetration; guide through the socket when aligned.
 
@@ -460,13 +534,15 @@ class FiberPlugTask:
             self._attach_at_world_pose(new_pos.tolist(), new_orn)
             return
 
-        # Outside the socket: do not allow the tip past the panel front plane.
-        if depth > 0.0:
+        # Outside the socket: block face penetration — except when the tip is
+        # over the hole, so the white ferrule can connect and panel-latch.
+        hole_r = float(self.cfg.get("panel_latch_hole_radius", 0.025))
+        if depth > 0.0 and lateral > hole_r:
             tip_target = tip_world - depth * insert_axis
             shift = tip_target - tip_world
             new_pos = (conn_pos + shift).tolist()
             self._attach_at_world_pose(new_pos, conn_orn.tolist())
-        # else: free motion in front of the panel — leave the canonical grasp constraint alone.
+        # else: free motion in front of the panel, or tip over the hole.
 
     def _check_insertion(self):
         tip_world, conn_axis, _, _ = self._tip_and_axis_world()
