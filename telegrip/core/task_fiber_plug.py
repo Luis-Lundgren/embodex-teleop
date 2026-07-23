@@ -60,12 +60,12 @@ DEFAULT_TASK_CONFIG = {
     "snap_radius": 0.02,              # meters, max lateral offset for snap
     "snap_angle_deg": 40.0,           # max axis misalignment for snap
     # Grasp: canonical pose of connector origin in Fixed_Jaw_tip frame.
-    # Connector +Y (ferrule) aligns with tip +Y so the white tip faces out of
+    # Connector +Y (ferrule) aligns with tip -Y so the white tip faces out of
     # the jaws toward the panel when the gripper approaches the port.
     "grasp_radius": 0.06,             # meters, EE tip to connector center
     "gripper_closed_threshold": 22.5, # degrees on the gripper joint
     "grasp_local_pos": [0.0, 0.01, 0.0],
-    "grasp_local_rpy_deg": [0.0, 0.0, 0.0],
+    "grasp_local_rpy_deg": [0.0, 0.0, 180.0],
     # Once grasped, ignore gripper-open until success/reset (XR trigger release
     # must not drop the connector).
     "latch_gripper_while_grasped": True,
@@ -257,7 +257,7 @@ class FiberPlugTask:
         dx, dy = self.cfg["spawn_range"]
         x = cx + random.uniform(-dx, dx)
         y = cy + random.uniform(-dy, dy)
-        yaw = random.uniform(-0.6, 0.6)  # roughly facing the port
+        yaw = np.pi + random.uniform(-0.6, 0.6)  # ferrule facing the port panel
         pos = self.base_position + np.array([x, y, CONN_BODY[2] / 2 + 0.001])
         orn = p.getQuaternionFromEuler([0, 0, yaw])
         p.resetBasePositionAndOrientation(self.connector_id, pos.tolist(), orn)

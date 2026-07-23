@@ -56,7 +56,7 @@ task:
   grasp_radius: 0.06
   gripper_closed_threshold: 22.5
   grasp_local_pos: [0.0, 0.01, 0.0]
-  grasp_local_rpy_deg: [0.0, 0.0, 0.0]
+  grasp_local_rpy_deg: [0.0, 0.0, 180.0]
   latch_gripper_while_grasped: true
   panel_latch_hole_radius: 0.035
   panel_latch_max_distance: 0.04
