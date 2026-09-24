@@ -1,0 +1,10 @@
+numpy
+scipy
+pybullet
+pynput
+pyyaml>=6.0
+pandas
+pyarrow
+fastapi
+uvicorn[standard]
+prisma

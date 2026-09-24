@@ -1,0 +1,3 @@
+# Optional ML / Physical Hardware dependencies for LeRobot SO-100 control
+torch
+lerobot[feetech]

@@ -1,0 +1,48 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: telegrip-db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-telegrip}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-telegrip_password}
+      POSTGRES_DB: ${POSTGRES_DB:-telegrip}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: host
+    container_name: telegrip-app
+    restart: always
+    ports:
+      - "${PORT:-8500}:8000"
+    environment:
+      - PORT=8000
+      - DIRECT_URL=postgresql://${POSTGRES_USER:-telegrip}:${POSTGRES_PASSWORD:-telegrip_password}@db:5432/${POSTGRES_DB:-telegrip}?schema=public
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-telegrip}:${POSTGRES_PASSWORD:-telegrip_password}@db:5432/${POSTGRES_DB:-telegrip}?schema=public
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - records_data:/app/records
+    depends_on:
+      db:
+        condition: service_healthy
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: telegrip-tunnel
+    restart: always
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - app
+
+volumes:
+  postgres_data:
+  records_data:
