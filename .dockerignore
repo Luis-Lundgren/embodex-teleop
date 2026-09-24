@@ -2,7 +2,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 .env
-.venv
+*.env
+.venv/
 env/
 venv/
 .git/
@@ -10,4 +11,11 @@ venv/
 .gitignore
 records/
 *.pem
+*.db
+*.sqlite*
 telegrip.egg-info/
+embodex_teleop.egg-info/
+vendor/telegrip/.git/
+vendor/telegrip/.venv/
+vendor/telegrip/__pycache__/
+vendor/telegrip/*.egg-info/
