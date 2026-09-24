@@ -1,0 +1,3 @@
+[submodule "vendor/telegrip"]
+	path = vendor/telegrip
+	url = https://github.com/Luis-Lundgren/telegrip.git
