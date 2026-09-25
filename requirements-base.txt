@@ -7,4 +7,3 @@ pandas
 pyarrow
 fastapi
 uvicorn[standard]
-prisma

@@ -35,10 +35,6 @@ RUN ln -s vendor/telegrip/URDF URDF
 # Install embodex-teleop package in editable mode
 RUN pip install --no-cache-dir -e .
 
-# Copy prisma schema and generate client if schema exists
-COPY prisma ./prisma
-RUN if [ -f "./prisma/schema.prisma" ]; then prisma generate --schema=./prisma/schema.prisma; fi
-
 # Create directory for recordings
 RUN mkdir -p records
 

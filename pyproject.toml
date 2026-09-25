@@ -23,7 +23,6 @@ dependencies = [
     "pyarrow",
     "fastapi",
     "uvicorn[standard]",
-    "prisma",
 ]
 
 requires-python = ">=3.10"
