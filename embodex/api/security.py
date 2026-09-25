@@ -65,8 +65,6 @@ def get_allowed_origins() -> List[str]:
         "http://127.0.0.1:3000",
         "http://localhost:8500",
         "http://127.0.0.1:8500",
-        "https://www.embodex.online",
-        "https://embodex.online",
     ]
 
 

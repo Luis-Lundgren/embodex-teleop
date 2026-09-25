@@ -53,10 +53,10 @@ def test_security_mode_detection():
 
 
 def test_cors_origin_parsing():
-    os.environ["EMBODEX_ALLOWED_ORIGINS"] = "http://localhost:3000, https://www.embodex.online/"
+    os.environ["EMBODEX_ALLOWED_ORIGINS"] = "http://localhost:3000, https://your-personal-instance.example.com/"
     origins = get_allowed_origins()
     assert "http://localhost:3000" in origins
-    assert "https://www.embodex.online" in origins
+    assert "https://your-personal-instance.example.com" in origins
     os.environ.pop("EMBODEX_ALLOWED_ORIGINS", None)
 
 
@@ -124,7 +124,7 @@ def test_invalid_token_rejected(mock_system):
 
 
 def test_cors_allowed_and_rejected_origins(mock_system):
-    os.environ["EMBODEX_ALLOWED_ORIGINS"] = "https://app.embodex.online,http://localhost:3000"
+    os.environ["EMBODEX_ALLOWED_ORIGINS"] = "https://your-personal-instance.example.com,http://localhost:3000"
 
     try:
         app = create_app(mock_system)
@@ -134,11 +134,11 @@ def test_cors_allowed_and_rejected_origins(mock_system):
         resp = client.options(
             "/health",
             headers={
-                "Origin": "https://app.embodex.online",
+                "Origin": "https://your-personal-instance.example.com",
                 "Access-Control-Request-Method": "GET",
             },
         )
-        assert resp.headers.get("access-control-allow-origin") == "https://app.embodex.online"
+        assert resp.headers.get("access-control-allow-origin") == "https://your-personal-instance.example.com"
 
         # Unknown origin
         resp_unknown = client.options(

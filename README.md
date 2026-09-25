@@ -90,7 +90,7 @@ Embodex Teleop is designed to be **safe by default when reachable over a network
 ### Critical Safety Guidelines:
 1. **Never expose an unauthenticated physical robot controller directly to the public internet** (e.g., via Cloudflare Tunnels, Fly.io, or port forwarding) without configuring `EMBODEX_SECURITY_MODE=hardware` and setting a cryptographically strong `EMBODEX_API_TOKEN`.
 2. **Authenticate with Bearer tokens**: Pass `Authorization: Bearer <EMBODEX_API_TOKEN>` in HTTP headers. For WebXR browsers, authenticate using `Sec-WebSocket-Protocol: bearer.<token>` or `?token=<token>`.
-3. **Restrict CORS Origins**: Set `EMBODEX_ALLOWED_ORIGINS` to a comma-separated allowlist of trusted domains (e.g., `EMBODEX_ALLOWED_ORIGINS=http://localhost:3000,https://www.embodex.online`).
+3. **Restrict CORS Origins**: Set `EMBODEX_ALLOWED_ORIGINS` to a comma-separated allowlist of trusted domains (e.g., `EMBODEX_ALLOWED_ORIGINS=http://localhost:3000,https://your-personal-instance.example.com`).
 4. **Test in simulation first**: Always test new controllers, gripper actions, and challenge tasks using `--no-robot` before powering physical Feetech STS3215 servos.
 5. **Emergency stop procedures**: Always maintain a physical power cutoff or emergency stop switch within reach of any active SO-100 robot workspace.
 
