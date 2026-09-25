@@ -53,7 +53,8 @@ AFRAME.registerComponent('controller-updater', {
     // !!! IMPORTANT: Replace 'YOUR_LAPTOP_IP' with the actual IP address of your laptop !!!
     // const websocketUrl = 'ws://YOUR_LAPTOP_IP:8442';
     try {
-      this.websocket = new WebSocket(websocketUrl);
+      const protocols = window.localDevToken ? [`bearer.${window.localDevToken}`] : undefined;
+      this.websocket = protocols ? new WebSocket(websocketUrl, protocols) : new WebSocket(websocketUrl);
       this.websocket.onopen = (event) => {
         console.log(`WebSocket connected to ${websocketUrl}`);
         this.reportVRStatus(true);

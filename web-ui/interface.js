@@ -4,6 +4,42 @@ let isRobotEngaged = false;
 let currentConfig = {};
 let warningTimeout = null;
 
+// Standalone / Local Dev UI Authentication (Memory-only, never persisted)
+window.localDevToken = '';
+
+const _origFetch = window.fetch;
+window.fetch = async function (url, init = {}) {
+  if (typeof url === 'string' && url.startsWith('/api/')) {
+    init = init || {};
+    init.headers = init.headers || {};
+    if (window.localDevToken) {
+      if (init.headers instanceof Headers) {
+        if (!init.headers.has('Authorization')) {
+          init.headers.set('Authorization', `Bearer ${window.localDevToken}`);
+        }
+      } else {
+        if (!init.headers['Authorization']) {
+          init.headers['Authorization'] = `Bearer ${window.localDevToken}`;
+        }
+      }
+    }
+  }
+  const response = await _origFetch(url, init);
+  if (response.status === 401 && typeof url === 'string' && url.startsWith('/api/')) {
+    const userToken = prompt('Embodex Teleop is running in protected hardware/token mode.\nEnter local developer API token (stored in memory for this session only):');
+    if (userToken && userToken.trim()) {
+      window.localDevToken = userToken.trim();
+      if (init.headers instanceof Headers) {
+        init.headers.set('Authorization', `Bearer ${window.localDevToken}`);
+      } else {
+        init.headers['Authorization'] = `Bearer ${window.localDevToken}`;
+      }
+      return _origFetch(url, init);
+    }
+  }
+  return response;
+};
+
 // Settings modal functions
 function openSettings() {
   const modal = document.getElementById('settingsModal');

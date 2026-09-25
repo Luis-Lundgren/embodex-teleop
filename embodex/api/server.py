@@ -20,6 +20,7 @@ import uvicorn
 
 from .security import (
     authenticate_websocket,
+    authenticate_websocket_connection,
     get_allowed_origins,
     get_security_mode,
     require_auth_if_protected,
@@ -53,8 +54,8 @@ def list_recorded_sessions(record_root: Path, active_session_id: Optional[str] =
                     pass
             sessions.append({
                 "id": session_id,
-                "record_dir": str(json_file.parent),
                 "createdAt": created_at,
+                "recording": False,
             })
     if active_session_id and active_session_id not in seen:
         sessions.insert(0, {"id": active_session_id, "recording": True})
@@ -74,12 +75,16 @@ def load_session_data(record_root: Path, session_id: str) -> Optional[dict]:
     return None
 
 
-async def _handle_fastapi_websocket(system: "EmbodexTeleopSystem", websocket: WebSocket):
+async def _handle_fastapi_websocket(
+    system: "EmbodexTeleopSystem",
+    websocket: WebSocket,
+    subprotocol: Optional[str] = None,
+):
     """
     Handle WebXR WebSocket connection, forwarding VR controller data to system command queue
     and supporting recording toggle.
     """
-    await websocket.accept()
+    await websocket.accept(subprotocol=subprotocol)
     client_address = f"{websocket.client.host}:{websocket.client.port}" if websocket.client else "unknown"
     logger.info(f"VR client connected: {client_address}")
 
@@ -115,8 +120,12 @@ async def _handle_fastapi_websocket(system: "EmbodexTeleopSystem", websocket: We
         if vr_server:
             vr_server.clients.discard(websocket)
             if hasattr(vr_server, "handle_grip_release"):
-                await vr_server.handle_grip_release("left")
-                await vr_server.handle_grip_release("right")
+                res_l = vr_server.handle_grip_release("left")
+                if asyncio.iscoroutine(res_l):
+                    await res_l
+                res_r = vr_server.handle_grip_release("right")
+                if asyncio.iscoroutine(res_r):
+                    await res_r
         logger.info(f"VR client {client_address} cleanup complete")
 
 
@@ -274,7 +283,7 @@ def create_app(system: "EmbodexTeleopSystem") -> FastAPI:
             logger.error(f"Error listing sessions: {e}")
             return JSONResponse(status_code=500, content={"error": str(e)})
 
-    @app.get("/api/config")
+    @app.get("/api/config", dependencies=[Depends(auth_dependency)])
     async def get_config():
         """Read public configuration settings."""
         try:
@@ -382,19 +391,24 @@ def create_app(system: "EmbodexTeleopSystem") -> FastAPI:
     async def websocket_endpoint(websocket: WebSocket):
         headers = dict(websocket.headers)
         query_params = dict(websocket.query_params)
+        client_host = websocket.client.host if websocket.client else None
 
-        if not authenticate_websocket(headers, query_params, robot_enabled=robot_enabled):
+        authenticated, accepted_subprotocol, ticket_payload = authenticate_websocket_connection(
+            headers, query_params, client_host=client_host, robot_enabled=robot_enabled
+        )
+
+        if not authenticated:
             logger.warning(
-                f"Rejected unauthorized WebSocket connection from {websocket.client.host if websocket.client else 'unknown'}"
+                f"Rejected unauthorized WebSocket connection from {client_host or 'unknown'}"
             )
             # 4401: Unauthorized (custom WebSocket close code within 4000-4999 application range)
-            await websocket.close(code=4401, reason="Unauthorized: EMBODEX_API_TOKEN required")
+            await websocket.close(code=4401, reason="Unauthorized: Valid ticket or token required")
             return
 
         if system.vr_server and hasattr(system.vr_server, "fastapi_handler"):
-            await system.vr_server.fastapi_handler(websocket)
+            await system.vr_server.fastapi_handler(websocket, subprotocol=accepted_subprotocol)
         elif system.vr_server:
-            await _handle_fastapi_websocket(system, websocket)
+            await _handle_fastapi_websocket(system, websocket, subprotocol=accepted_subprotocol)
         else:
             await websocket.close(code=1011)
 

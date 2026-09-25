@@ -167,7 +167,12 @@ def parse_arguments():
     parser.add_argument("--record-dir", type=str, default="records", help="Root directory for dataset session recordings")
     parser.add_argument("--record-vr-only", action="store_true", help="Record only raw VR packets (no robot joints)")
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8500)), help="Port for REST API and WebSockets")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host interface to bind")
+    parser.add_argument(
+        "--host",
+        type=str,
+        default=None,
+        help="Host interface to bind (defaults to 127.0.0.1 in local mode, 0.0.0.0 otherwise)",
+    )
     parser.add_argument("--left-port", type=str, help="Serial port for left follower arm")
     parser.add_argument("--right-port", type=str, help="Serial port for right follower arm")
     parser.add_argument("--ros2", action="store_true", help="Enable ROS2 transform broadcaster bridge")
@@ -177,6 +182,8 @@ def parse_arguments():
 
 
 def build_config(args) -> TelegripConfig:
+    from .api.security import get_security_mode, SECURITY_MODE_LOCAL
+
     config = TelegripConfig()
     config.enable_robot = not args.no_robot
     config.enable_pybullet_gui = not args.no_viz
@@ -187,7 +194,14 @@ def build_config(args) -> TelegripConfig:
     config.digital_twin_enabled = args.digital_twin
     config.log_level = args.log_level
     config.port = args.port
-    config.host_ip = args.host
+
+    sec_mode = get_security_mode(robot_enabled=config.enable_robot)
+    if args.host:
+        config.host_ip = args.host
+    elif sec_mode == SECURITY_MODE_LOCAL:
+        config.host_ip = "127.0.0.1"
+    else:
+        config.host_ip = "0.0.0.0"
 
     config_data = get_config_data()
     robot_cfg = config_data.get("robot", {})
