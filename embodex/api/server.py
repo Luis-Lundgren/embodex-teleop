@@ -1,19 +1,30 @@
 """
 Embodex FastAPI Server.
-Exposes REST endpoints, WebXR WebSocket proxy, static files, and health checks.
+Exposes REST endpoints, WebXR WebSocket proxy, static files, and health checks with
+security mode and origin allowlisting.
 """
 
 import asyncio
 import json
 import logging
 from pathlib import Path
+import time
 from typing import Optional, TYPE_CHECKING
 
-from fastapi import FastAPI, Request, WebSocket
+from fastapi import Depends, FastAPI, HTTPException, Request, Security, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 import uvicorn
+
+from .security import (
+    authenticate_websocket,
+    get_allowed_origins,
+    get_security_mode,
+    require_auth_if_protected,
+    _bearer_security,
+)
 
 if TYPE_CHECKING:
     from ..cli import EmbodexTeleopSystem
@@ -63,17 +74,146 @@ def load_session_data(record_root: Path, session_id: str) -> Optional[dict]:
     return None
 
 
+async def _handle_fastapi_websocket(system: "EmbodexTeleopSystem", websocket: WebSocket):
+    """
+    Handle WebXR WebSocket connection, forwarding VR controller data to system command queue
+    and supporting recording toggle.
+    """
+    await websocket.accept()
+    client_address = f"{websocket.client.host}:{websocket.client.port}" if websocket.client else "unknown"
+    logger.info(f"VR client connected: {client_address}")
+
+    vr_server = system.vr_server
+    if vr_server:
+        vr_server.clients.add(websocket)
+
+    try:
+        while True:
+            message = await websocket.receive_text()
+            try:
+                data = json.loads(message)
+                action = data.get("action")
+                if action == "record_toggle":
+                    logger.info("🔴 VR record_toggle requested via WebSocket")
+                    if system.control_loop:
+                        from telegrip.inputs.base import ControlGoal
+                        await system.command_queue.put(
+                            ControlGoal(arm="left", metadata={"record_toggle": True})
+                        )
+                elif action == "auth":
+                    # In-band auth confirmation
+                    continue
+                elif vr_server and hasattr(vr_server, "process_controller_data"):
+                    await vr_server.process_controller_data(data)
+            except json.JSONDecodeError:
+                logger.warning(f"Received non-JSON message: {message}")
+            except Exception as e:
+                logger.error(f"Error processing VR data: {e}")
+    except Exception as e:
+        logger.info(f"VR client {client_address} disconnected: {e}")
+    finally:
+        if vr_server:
+            vr_server.clients.discard(websocket)
+            if hasattr(vr_server, "handle_grip_release"):
+                await vr_server.handle_grip_release("left")
+                await vr_server.handle_grip_release("right")
+        logger.info(f"VR client {client_address} cleanup complete")
+
+
+def _attach_vr_broadcaster_helpers(vr_server):
+    """Ensure broadcast helper methods are attached to vr_server for WebXR digital twin."""
+    if not hasattr(vr_server, "broadcast_robot_state"):
+        async def broadcast_robot_state(
+            left_angles=None,
+            right_angles=None,
+            is_recording=False,
+            session_id=None,
+            record_dir=None,
+            objects=None,
+            task=None,
+        ):
+            if not getattr(vr_server, "clients", None):
+                return
+            msg = {
+                "type": "robot_state",
+                "timestamp": int(time.time() * 1000),
+                "left_arm": left_angles.tolist() if hasattr(left_angles, "tolist") else (left_angles or []),
+                "is_recording": is_recording,
+                "session_id": session_id,
+                "record_dir": record_dir,
+            }
+            if right_angles is not None:
+                msg["right_arm"] = right_angles.tolist() if hasattr(right_angles, "tolist") else right_angles
+            if objects:
+                msg["objects"] = objects
+            if task:
+                msg["task"] = task
+
+            encoded = json.dumps(msg)
+            for client in list(vr_server.clients):
+                try:
+                    if hasattr(client, "send_text"):
+                        await client.send_text(encoded)
+                    elif hasattr(client, "send"):
+                        await client.send(encoded)
+                except Exception:
+                    pass
+
+        setattr(vr_server, "broadcast_robot_state", broadcast_robot_state)
+
+    if not hasattr(vr_server, "broadcast_recording_stopped"):
+        async def broadcast_recording_stopped(session_id, record_dir):
+            if not getattr(vr_server, "clients", None):
+                return
+            msg = {
+                "type": "recording_stopped",
+                "session_id": session_id,
+                "record_dir": record_dir,
+            }
+            encoded = json.dumps(msg)
+            for client in list(vr_server.clients):
+                try:
+                    if hasattr(client, "send_text"):
+                        await client.send_text(encoded)
+                    elif hasattr(client, "send"):
+                        await client.send(encoded)
+                except Exception:
+                    pass
+
+        setattr(vr_server, "broadcast_recording_stopped", broadcast_recording_stopped)
+
+
 def create_app(system: "EmbodexTeleopSystem") -> FastAPI:
     """Create a FastAPI application bound to an EmbodexTeleopSystem instance."""
     app = FastAPI(title="Embodex Teleoperation API", version="0.1.0")
 
+    robot_enabled = getattr(system.config, "enable_robot", False)
+    allowed_origins = get_allowed_origins()
+
+    # If wildcard is configured, credentials must not be allowed
+    allow_credentials = False if "*" in allowed_origins else True
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=allowed_origins,
+        allow_credentials=allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Attach VR broadcaster helpers if vr_server is active
+    if system.vr_server:
+        _attach_vr_broadcaster_helpers(system.vr_server)
+
+    async def auth_dependency(
+        request: Request,
+        credentials: Optional[HTTPAuthorizationCredentials] = Security(_bearer_security),
+    ):
+        return await require_auth_if_protected(
+            request, credentials=credentials, robot_enabled=robot_enabled
+        )
+
+    # ------------------ Public Read-Only Endpoints ------------------
 
     @app.get("/health")
     async def health():
@@ -89,6 +229,7 @@ def create_app(system: "EmbodexTeleopSystem") -> FastAPI:
             "robot_engaged": robot_engaged,
             "recording": loop.recorder.is_running() if (loop and loop.recorder) else False,
             "task_active": (loop.task is not None) if loop else False,
+            "security_mode": get_security_mode(robot_enabled=robot_enabled),
         }
 
     @app.get("/api/status")
@@ -105,6 +246,8 @@ def create_app(system: "EmbodexTeleopSystem") -> FastAPI:
 
             vr_connected = False
             if system.vr_server and getattr(system.vr_server, "is_running", False):
+                vr_connected = len(getattr(system.vr_server, "clients", [])) > 0
+            elif system.vr_server and hasattr(system.vr_server, "clients"):
                 vr_connected = len(system.vr_server.clients) > 0
 
             return {
@@ -112,6 +255,7 @@ def create_app(system: "EmbodexTeleopSystem") -> FastAPI:
                 "keyboardEnabled": keyboard_enabled,
                 "robotEngaged": robot_engaged,
                 "vrConnected": vr_connected,
+                "securityMode": get_security_mode(robot_enabled=robot_enabled),
             }
         except Exception as e:
             logger.error(f"Error handling status request: {e}")
@@ -119,6 +263,7 @@ def create_app(system: "EmbodexTeleopSystem") -> FastAPI:
 
     @app.get("/api/sessions")
     async def get_sessions():
+        """List session metadata summaries."""
         try:
             record_root = system.control_loop.record_root if system.control_loop else Path("records")
             active_id = None
@@ -129,8 +274,21 @@ def create_app(system: "EmbodexTeleopSystem") -> FastAPI:
             logger.error(f"Error listing sessions: {e}")
             return JSONResponse(status_code=500, content={"error": str(e)})
 
-    @app.get("/api/sessions/{session_id}")
+    @app.get("/api/config")
+    async def get_config():
+        """Read public configuration settings."""
+        try:
+            from telegrip.config import get_config_data
+            return get_config_data()
+        except Exception as e:
+            logger.error(f"Error getting config: {e}")
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    # ------------------ Protected Endpoints ------------------
+
+    @app.get("/api/sessions/{session_id}", dependencies=[Depends(auth_dependency)])
     async def get_single_session(session_id: str):
+        """Retrieve full trajectory dataset contents for a recorded session (Protected)."""
         try:
             record_root = system.control_loop.record_root if system.control_loop else Path("records")
             data = load_session_data(record_root, session_id)
@@ -141,16 +299,7 @@ def create_app(system: "EmbodexTeleopSystem") -> FastAPI:
             logger.error(f"Error fetching session {session_id}: {e}")
             return JSONResponse(status_code=500, content={"error": str(e)})
 
-    @app.get("/api/config")
-    async def get_config():
-        try:
-            from telegrip.config import get_config_data
-            return get_config_data()
-        except Exception as e:
-            logger.error(f"Error getting config: {e}")
-            return JSONResponse(status_code=500, content={"error": str(e)})
-
-    @app.post("/api/config")
+    @app.post("/api/config", dependencies=[Depends(auth_dependency)])
     async def post_config(request: Request):
         try:
             from telegrip.config import update_config_data
@@ -163,7 +312,7 @@ def create_app(system: "EmbodexTeleopSystem") -> FastAPI:
             logger.error(f"Error updating config: {e}")
             return JSONResponse(status_code=500, content={"error": str(e)})
 
-    @app.post("/api/keyboard")
+    @app.post("/api/keyboard", dependencies=[Depends(auth_dependency)])
     async def post_keyboard(request: Request):
         try:
             data = await request.json()
@@ -175,7 +324,7 @@ def create_app(system: "EmbodexTeleopSystem") -> FastAPI:
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e)})
 
-    @app.post("/api/robot")
+    @app.post("/api/robot", dependencies=[Depends(auth_dependency)])
     async def post_robot(request: Request):
         try:
             data = await request.json()
@@ -187,7 +336,7 @@ def create_app(system: "EmbodexTeleopSystem") -> FastAPI:
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e)})
 
-    @app.post("/api/keypress")
+    @app.post("/api/keypress", dependencies=[Depends(auth_dependency)])
     async def post_keypress(request: Request):
         try:
             data = await request.json()
@@ -201,7 +350,7 @@ def create_app(system: "EmbodexTeleopSystem") -> FastAPI:
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e)})
 
-    @app.post("/api/task")
+    @app.post("/api/task", dependencies=[Depends(auth_dependency)])
     async def post_task(request: Request):
         try:
             data = await request.json()
@@ -218,7 +367,7 @@ def create_app(system: "EmbodexTeleopSystem") -> FastAPI:
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e)})
 
-    @app.post("/api/restart")
+    @app.post("/api/restart", dependencies=[Depends(auth_dependency)])
     async def post_restart():
         try:
             system.restart()
@@ -226,15 +375,30 @@ def create_app(system: "EmbodexTeleopSystem") -> FastAPI:
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e)})
 
+    # ------------------ WebSocket Endpoint (Protected in Hardware/Token Mode) ------------------
+
     @app.websocket("/ws")
     @app.websocket("/ws/")
     async def websocket_endpoint(websocket: WebSocket):
+        headers = dict(websocket.headers)
+        query_params = dict(websocket.query_params)
+
+        if not authenticate_websocket(headers, query_params, robot_enabled=robot_enabled):
+            logger.warning(
+                f"Rejected unauthorized WebSocket connection from {websocket.client.host if websocket.client else 'unknown'}"
+            )
+            # 4401: Unauthorized (custom WebSocket close code within 4000-4999 application range)
+            await websocket.close(code=4401, reason="Unauthorized: EMBODEX_API_TOKEN required")
+            return
+
         if system.vr_server and hasattr(system.vr_server, "fastapi_handler"):
             await system.vr_server.fastapi_handler(websocket)
+        elif system.vr_server:
+            await _handle_fastapi_websocket(system, websocket)
         else:
             await websocket.close(code=1011)
 
-    # Static fallback
+    # ------------------ Static Files Fallback ------------------
     web_ui_path = Path("web-ui")
     if not web_ui_path.exists():
         vendor_web_ui = Path("vendor/telegrip/web-ui")
