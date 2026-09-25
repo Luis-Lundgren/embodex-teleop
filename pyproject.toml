@@ -46,7 +46,6 @@ dev = [
 
 [project.scripts]
 embodex-teleop = "embodex.cli:main"
-telegrip = "embodex.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/Luis-Lundgren/embodex-teleop"
@@ -56,3 +55,7 @@ Issues = "https://github.com/Luis-Lundgren/embodex-teleop/issues"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["embodex*"]
+
+[tool.pytest.ini_options]
+addopts = "-p no:launch_testing -p no:launch_testing_ros"
+testpaths = ["tests"]
