@@ -73,9 +73,9 @@ class ROS2Bridge:
 
     def __init__(
         self,
-        node_name: str = "telegrip_bridge",
+        node_name: str = "embodex_teleop_bridge",
         base_frame: str = "teleop_base",
-        topic_prefix: str = "telegrip",
+        topic_prefix: str = "embodex",
     ):
         if not _import_ros2():
             raise RuntimeError(

@@ -1,12 +1,12 @@
 services:
   db:
     image: postgres:15-alpine
-    container_name: telegrip-db
+    container_name: embodex-db
     restart: always
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-telegrip}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-telegrip_password}
-      POSTGRES_DB: ${POSTGRES_DB:-telegrip}
+      POSTGRES_USER: ${POSTGRES_USER:-embodex}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-embodex_password}
+      POSTGRES_DB: ${POSTGRES_DB:-embodex}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -20,24 +20,22 @@ services:
       context: .
       dockerfile: Dockerfile
       network: host
-    container_name: telegrip-app
+    container_name: embodex-teleop
     restart: always
     ports:
       - "${PORT:-8500}:8000"
     environment:
       - PORT=8000
-      - DIRECT_URL=postgresql://${POSTGRES_USER:-telegrip}:${POSTGRES_PASSWORD:-telegrip_password}@db:5432/${POSTGRES_DB:-telegrip}?schema=public
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-telegrip}:${POSTGRES_PASSWORD:-telegrip_password}@db:5432/${POSTGRES_DB:-telegrip}?schema=public
+      - EMBODEX_SECURITY_MODE=${EMBODEX_SECURITY_MODE:-simulation}
+      - EMBODEX_API_TOKEN=${EMBODEX_API_TOKEN:-}
+      - EMBODEX_ALLOWED_ORIGINS=${EMBODEX_ALLOWED_ORIGINS:-}
       - PYTHONUNBUFFERED=1
     volumes:
       - records_data:/app/records
-    depends_on:
-      db:
-        condition: service_healthy
 
   tunnel:
     image: cloudflare/cloudflared:latest
-    container_name: telegrip-tunnel
+    container_name: embodex-teleop-tunnel
     restart: always
     command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:

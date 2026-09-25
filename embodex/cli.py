@@ -61,9 +61,9 @@ class EmbodexTeleopSystem:
         # Optional ROS2 bridge
         self.ros2_bridge = create_ros2_bridge_if_enabled(
             getattr(config, "enable_ros2", False),
-            node_name=getattr(config, "ros2_node_name", "telegrip_bridge"),
+            node_name=getattr(config, "ros2_node_name", "embodex_teleop_bridge"),
             base_frame=getattr(config, "ros2_base_frame", "teleop_base"),
-            topic_prefix=getattr(config, "ros2_topic_prefix", "telegrip"),
+            topic_prefix=getattr(config, "ros2_topic_prefix", "embodex"),
         )
         if self.ros2_bridge:
             self.control_loop.ros2_bridge = self.ros2_bridge
