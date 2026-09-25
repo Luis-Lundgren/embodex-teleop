@@ -1,56 +1,95 @@
-# Deploying Telegrip on Local Coolify
+# Deploying Embodex Teleop on Coolify
 
-This guide explains how to host the Telegrip application and its PostgreSQL database on your local Coolify instance running at `http://localhost:8000/`.
+This guide explains how to deploy the `embodex-teleop` service and its database on a Coolify instance with production-grade security configuration.
+
+---
 
 ## Prerequisites
-- A running Coolify instance (e.g., accessible at `http://localhost:8000/`).
-- Docker installed on the host machine where Coolify is running.
+- A running Coolify instance.
+- Docker installed on the host machine.
+- An instance of `embodex-web` deployed or running to broker user teleoperation access.
 
 ---
 
 ## Deployment Steps
 
 ### Step 1: Create a Project in Coolify
-1. Open your Coolify dashboard at `http://localhost:8000/`.
-2. Go to **Projects** and click **Add New Project**.
-3. Provide a name, e.g., `Telegrip Unified Teleoperation`.
+1. Open your Coolify dashboard.
+2. Navigate to **Projects** and click **Add New Project**.
+3. Set a name, e.g., `Embodex Teleop Backend`.
 
 ### Step 2: Add a Docker Compose Resource
 1. Inside the project environment, click **+ Add Resource** -> select **Docker Compose**.
-2. Select the destination server (usually `localhost`).
-3. You have two options for the source:
-   - **Git Repository**: Point it to this repository's Git URL (`https://github.com/Luis-Lundgren/telegrip-embodex.git`) and branch. Coolify will read the `docker-compose.yml` from the repository root.
-   - **Raw Docker Compose**: Copy the contents of [docker-compose.yml](file:///home/user0/TELEOP/embodex-telegrip/docker-compose.yml) and paste it directly into the Compose box in Coolify.
-
-### Step 3: Configure Environment Variables
-Coolify will parse the environment variables from the compose file. You can configure them or leave the defaults:
-- `POSTGRES_USER`: Database user (default: `telegrip`)
-- `POSTGRES_PASSWORD`: Database password (default: `telegrip_password`)
-- `POSTGRES_DB`: Database name (default: `telegrip`)
-- `PORT`: App external port mapping (default: `8000`)
-
-*Note: The database credentials will be dynamically injected into the database connection variables (`DATABASE_URL` and `DIRECT_URL`) for the application container.*
-
-### Step 4: Configure Domain and SSL
-In the Coolify dashboard under the `app` service settings:
-1. Locate the **Domains** field.
-2. Enter the domain or local URL you want to use (e.g., `http://telegrip.local` or `http://localhost:8000`).
-3. Coolify will automatically configure its reverse proxy (Traefik/Caddy) to forward traffic to the application.
-4. **WebSocket Support:** Coolify's reverse proxy supports WebSockets out-of-the-box. The frontend dynamically resolves the websocket endpoint using the browser's current host (e.g. `ws://telegrip.local/ws` or `wss://telegrip.local/ws`), ensuring seamless connection without configuration.
-
-### Step 5: Deploy the Application
-1. Click **Deploy**.
-2. Coolify will start the database container, wait for it to be healthy, build the backend application image, run migrations via the custom entrypoint, and launch the server.
-3. Check the **Deployment Logs** in Coolify to ensure the backend starts correctly:
-   - You should see `Database is ready!` followed by `Running database migrations via prisma db push...`.
-   - Then, the FastAPI server logs: `Server running on 0.0.0.0:8000`.
+2. Select your destination server (e.g., `localhost`).
+3. Choose your configuration source:
+   - **Git Repository**: Point to `https://github.com/Luis-Lundgren/embodex-teleop.git` on branch `main`. Coolify will automatically read `docker-compose.yml`.
+   - **Raw Docker Compose**: Copy the contents of `docker-compose.yml` into the Compose editor in Coolify.
 
 ---
 
-## Customizing Command Line Arguments
-By default, the container starts with:
-`telegrip --no-robot --digital-twin --record`
+## Step 3: Configure Environment Variables
 
-If you want to modify the command line parameters (e.g. disable PyBullet simulation, change log level, etc.), you can edit the **Command** field of the `app` service in Coolify:
-- Example command to disable PyBullet visualization (headless): `telegrip --no-robot --no-viz --record`
-- Example command to stream VR inputs to ROS2: `telegrip --no-robot --ros2 --record`
+For secured deployments, configure the following environment variables in the Coolify **Environment Variables** section:
+
+### 1. Security Configuration
+| Variable | Description | Example Value |
+| :--- | :--- | :--- |
+| `EMBODEX_SECURITY_MODE` | Security mode: `hardware` (enforces tokens/tickets), `simulation`, or `local` | `hardware` |
+| `EMBODEX_API_TOKEN` | Permanent service Bearer token matching `embodex-web` | *(Generate via `openssl rand -hex 32`)* |
+| `EMBODEX_WS_TICKET_SECRET` | Shared secret to verify short-lived tickets matching `embodex-web` | *(Generate via `openssl rand -hex 32`)* |
+| `EMBODEX_ALLOWED_ORIGINS` | Comma-separated allowed web origins for CORS | `https://your-personal-instance.example.com` |
+
+> [!IMPORTANT]
+> **Secret Generation**: Generate separate, cryptographically secure values for the service token and ticket secret:
+> ```bash
+> openssl rand -hex 32   # Value for EMBODEX_API_TOKEN
+> openssl rand -hex 32   # Value for EMBODEX_WS_TICKET_SECRET
+> ```
+> **Do not reuse the same secret** for `EMBODEX_API_TOKEN` and `EMBODEX_WS_TICKET_SECRET`.
+>
+> The **same `EMBODEX_WS_TICKET_SECRET`** must be configured on both `embodex-web` and `embodex-teleop`, because `embodex-web` signs short-lived tickets and `embodex-teleop` verifies them.
+>
+> Likewise, `EMBODEX_API_TOKEN` on `embodex-web` must match `EMBODEX_API_TOKEN` on `embodex-teleop`.
+
+### 2. General Service Settings
+- `PORT`: App external port mapping (default: `8500`)
+- `POSTGRES_USER`: Database user (default: `embodex`)
+- `POSTGRES_PASSWORD`: Strong database password
+- `POSTGRES_DB`: Database name (default: `embodex`)
+
+---
+
+## Step 4: Configure Domain and SSL
+In the Coolify dashboard under the `app` service settings:
+1. Locate the **Domains** field.
+2. Enter the domain or subdomain for the teleop service (e.g. `https://teleop.your-personal-instance.example.com`).
+3. Coolify automatically configures SSL/TLS and reverse-proxies both HTTP and WebSocket traffic (`/ws`).
+
+---
+
+## Step 5: Deploy the Application
+1. Click **Deploy**.
+2. Coolify will build the backend application image, initialize the database container, and launch the server.
+3. Check the **Deployment Logs** to confirm startup:
+   - FastAPI server logs: `Embodex server listening on 0.0.0.0:8000`.
+   - Security status confirms `security_mode="hardware"` (or configured mode).
+
+---
+
+## Step 6: Verify Health & Security
+Once deployed, test health and auth endpoints:
+```bash
+# Public health check
+curl https://teleop.your-personal-instance.example.com/health
+
+# Verify unauthenticated control calls are rejected (401)
+curl -X POST https://teleop.your-personal-instance.example.com/api/robot \
+  -H "Content-Type: application/json" \
+  -d '{"action":"connect"}'
+
+# Verify authorized control calls succeed
+curl -X POST https://teleop.your-personal-instance.example.com/api/robot \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <YOUR_EMBODEX_API_TOKEN>" \
+  -d '{"action":"connect"}'
+```
